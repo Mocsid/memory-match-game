@@ -4,35 +4,19 @@ const dotenv = require("dotenv");
 
 dotenv.config();
 
-const { db } = require("../services/firebaseService");  // ✅ Import Firebase without re-initializing
-
 const app = express();
 app.use(cors());
 app.use(express.json());
 
+// ✅ Import Routes
+const authRoutes = require("../routes/authRoutes");
+
+// ✅ Use Routes
+app.use("/auth", authRoutes);
+
 // ✅ Test API Route
 app.get("/", (req, res) => {
-    res.send("Backend is running correctly!");
-});
-
-// ✅ Firebase Write Test Route
-app.post("/write", async (req, res) => {
-    try {
-        await db.ref("testData").set({ message: "Hello from Firebase!" });
-        res.json({ success: true });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// ✅ Firebase Read Test Route
-app.get("/read", async (req, res) => {
-    try {
-        const snapshot = await db.ref("testData").once("value");
-        res.json(snapshot.val());
-    } catch (error) {
-        res.status(500).json({ error: error.message });
-    }
+  res.send("Backend is running! Use API endpoints!");
 });
 
 // ✅ Start Express Server

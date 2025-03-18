@@ -8,10 +8,12 @@ services:
     env_file:
       - ./functions/.env
     volumes:
-      - ./functions/firebase-service-account.json:/app/firebase-service-account.json
+      - ./functions:/app  # ✅ Mount entire backend folder to container
+      - /app/node_modules  # ✅ Ensure node_modules stays inside container
     depends_on:
       - frontend
-    restart: unless-stopped
+    restart: unless-stopped  # ✅ Ensures it restarts on failure
+    command: ["npm", "run", "dev"]  # ✅ Use nodemon instead of node
 
   frontend:
     build: ./frontend
