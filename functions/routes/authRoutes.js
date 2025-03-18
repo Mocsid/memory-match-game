@@ -1,10 +1,15 @@
 const express = require("express");
-const router = express.Router();
-const authController = require("../controllers/authController");
+const { signupUser, loginUser, getUserProfile } = require("../controllers/authController");
 
-// ✅ Define authentication routes
-router.post("/signup", authController.signup);
-router.post("/login", authController.login);
-router.get("/profile/:userId", authController.getUserProfile);
+const router = express.Router();
+
+// Route for user signup
+router.post("/signup", signupUser);
+
+// Route for user login
+router.post("/login", loginUser);
+
+// Route for fetching user profile
+router.get("/profile/:userId", getUserProfile);
 
 module.exports = router;

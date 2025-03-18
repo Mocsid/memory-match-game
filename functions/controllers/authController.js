@@ -1,65 +1,99 @@
-const { auth, db } = require("../services/firebaseService");
+const admin = require("firebase-admin");
 
-// ✅ User Signup
-exports.signup = async (req, res) => {
+const auth = admin.auth();
+const db = admin.firestore();
+
+/**
+ * User Signup
+ */
+exports.signupUser = async (req, res) => {
     const { email, password, username } = req.body;
-
+  
+    if (!email || !password || !username) {
+      return res.status(400).json({ error: "Missing fields" });
+    }
+  
     try {
-        // 🔹 Check if username already exists
-        const usernameSnapshot = await db.ref("users").orderByChild("username").equalTo(username).once("value");
-
-        if (usernameSnapshot.exists()) {
-            return res.status(400).json({ error: "Username already taken" });
+      // ✅ Check if username is already taken
+      const existingUser = await db.collection("users").where("username", "==", username).get();
+      if (!existingUser.empty) {
+        return res.status(400).json({ error: "Username already in use" });
+      }
+  
+      // ✅ Create new user in Firebase Auth
+      const userRecord = await auth.createUser({
+        email,
+        password,
+        displayName: username,
+      });
+  
+      // ✅ Store user details in Firestore
+      await db.collection("users").doc(userRecord.uid).set({
+        username,
+        email,
+        createdAt: new Date().toISOString(),
+      });
+  
+      res.json({ success: true, userId: userRecord.uid });
+    } catch (error) {
+      // 🔴 If user was created in Firebase Auth but Firestore write failed, delete the Auth record
+      if (error.message.includes("NOT_FOUND") && email) {
+        const user = await auth.getUserByEmail(email).catch(() => null);
+        if (user) {
+          await auth.deleteUser(user.uid);
         }
-
-        // 🔹 Create user in Firebase Authentication
-        const userRecord = await auth.createUser({
-            email,
-            password,
-            displayName: username,
-        });
-
-        // 🔹 Save user details in Firebase Database
-        await db.ref(`users/${userRecord.uid}`).set({
-            email,
-            username,
-            createdAt: new Date().toISOString(),
-            gamesPlayed: 0,
-            wins: 0,
-            losses: 0,
-        });
-
-        res.json({ success: true, userId: userRecord.uid });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message });
     }
-};
+  };
 
-// ✅ User Login
-exports.login = async (req, res) => {
-    const { email, password } = req.body;
-
+/**
+ * User Login
+ */
+exports.loginUser = async (req, res) => {
+    const { email } = req.body; // 🔹 Frontend handles password verification
+  
+    if (!email) {
+      return res.status(400).json({ error: "Email is required" });
+    }
+  
     try {
-        // Firebase Authentication does not provide direct password verification, must be done via Firebase SDK on frontend
-        res.status(200).json({ message: "Login handled on frontend via Firebase Auth SDK." });
+      // ✅ Find user by email in Firebase Auth
+      const userRecord = await admin.auth().getUserByEmail(email);
+  
+      // ✅ Retrieve user details from Firestore
+      const userDoc = await db.collection("users").doc(userRecord.uid).get();
+      if (!userDoc.exists) {
+        return res.status(404).json({ error: "User profile not found" });
+      }
+  
+      // ✅ Return user data
+      res.json({ success: true, user: userDoc.data() });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+      res.status(500).json({ error: error.message });
     }
-};
+  };
+  
 
-// ✅ Get User Profile
+/**
+ * 👤 Get User Profile (Retrieves user details from Firestore)
+ */
 exports.getUserProfile = async (req, res) => {
-    const { userId } = req.params;
+  const { userId } = req.params;
 
-    try {
-        const userSnapshot = await db.ref(`users/${userId}`).once("value");
+  if (!userId) {
+    return res.status(400).json({ error: "User ID is required" });
+  }
 
-        if (!userSnapshot.exists()) {
-            return res.status(404).json({ error: "User not found" });
-        }
+  try {
+    const userDoc = await db.collection("users").doc(userId).get();
 
-        res.json(userSnapshot.val());
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+    if (!userDoc.exists) {
+      return res.status(404).json({ error: "User not found" });
     }
+
+    res.json({ success: true, user: userDoc.data() });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 };
