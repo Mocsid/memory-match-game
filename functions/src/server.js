@@ -10,8 +10,12 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Firebase Admin Initialization
-const serviceAccount = JSON.parse(fs.readFileSync("./firebase-service-account.json", "utf8"));
+// ✅ Firebase Admin Initialization
+const serviceAccountPath = process.env.FIREBASE_CREDENTIALS || "./firebase-service-account.json";
+if (!fs.existsSync(serviceAccountPath)) {
+  throw new Error("🔥 Firebase service account file is missing!");
+}
+const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, "utf8"));
 
 if (!admin.apps.length) {
   admin.initializeApp({
@@ -20,10 +24,13 @@ if (!admin.apps.length) {
   });
 }
 
-// Import Routes
+// ✅ Import Routes
 const authRoutes = require("../routes/authRoutes");
+const indexRoutes = require("../routes"); // Import index.js which registers all routes
 
-app.use("/api/auth", authRoutes);
+// ✅ Add Routes
+app.use("/", indexRoutes);  // ✅ Root API route
+app.use("/api/auth", authRoutes); // ✅ Authentication routes
 
 const PORT = process.env.EXPRESS_PORT || 3001;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));

@@ -8,12 +8,11 @@ services:
     env_file:
       - ./functions/.env
     volumes:
-      - ./functions:/app  # ✅ Mount entire backend folder to container
-      - /app/node_modules  # ✅ Ensure node_modules stays inside container
+      - ./functions:/app  # ✅ Mount entire backend folder
     depends_on:
       - frontend
-    restart: unless-stopped  # ✅ Ensures it restarts on failure
-    command: ["npm", "run", "dev"]  # ✅ Use nodemon instead of node
+    restart: unless-stopped
+    command: ["npm", "run", "dev"]
 
   frontend:
     build: ./frontend
@@ -21,6 +20,5 @@ services:
       - "3000:3000"
     stdin_open: true
     volumes:
-      - ./frontend:/app
-      - /app/node_modules
+      - ./frontend:/app  # ✅ Mount frontend but keep container's own node_modules
     restart: unless-stopped
