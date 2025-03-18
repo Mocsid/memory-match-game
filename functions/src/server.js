@@ -3,12 +3,25 @@ const cors = require("cors");
 const admin = require("firebase-admin");
 const dotenv = require("dotenv");
 const fs = require("fs");
+const rateLimit = require("express-rate-limit");
+const helmet = require("helmet");
 
 dotenv.config();
 
 const app = express();
+
+// ✅ Security Middleware
+app.use(helmet()); // Adds security headers
 app.use(cors());
 app.use(express.json());
+
+// ✅ Rate Limiting - Prevents API abuse & brute-force attacks
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per window
+  message: { error: "Too many requests. Please try again later." },
+});
+app.use(limiter);
 
 // ✅ Firebase Admin Initialization
 const serviceAccountPath = process.env.FIREBASE_CREDENTIALS || "./firebase-service-account.json";
@@ -24,13 +37,20 @@ if (!admin.apps.length) {
   });
 }
 
+// ✅ Middleware for Logging IP Address of Each Request
+app.use((req, res, next) => {
+  console.log(`📌 Request from IP: ${req.ip}, Route: ${req.originalUrl}`);
+  next();
+});
+
 // ✅ Import Routes
 const authRoutes = require("../routes/authRoutes");
 const indexRoutes = require("../routes"); // Import index.js which registers all routes
 
 // ✅ Add Routes
-app.use("/", indexRoutes);  // ✅ Root API route
+app.use("/", indexRoutes); // ✅ Root API route
 app.use("/api/auth", authRoutes); // ✅ Authentication routes
 
+// ✅ Start Server
 const PORT = process.env.EXPRESS_PORT || 3001;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
