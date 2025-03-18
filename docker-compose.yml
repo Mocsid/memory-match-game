@@ -11,6 +11,7 @@ services:
       - ./functions/firebase-service-account.json:/app/firebase-service-account.json
     depends_on:
       - frontend
+    restart: unless-stopped
 
   frontend:
     build: ./frontend
@@ -20,3 +21,4 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
+    restart: unless-stopped
