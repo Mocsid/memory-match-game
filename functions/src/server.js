@@ -3,7 +3,7 @@ const cors = require("cors");
 const admin = require("firebase-admin");
 const dotenv = require("dotenv");
 const fs = require("fs");
-const rateLimit = require("express-rate-limit");
+const rateLimit = require("express-rate-limit").default || require("express-rate-limit"); // Ensure compatibility
 const helmet = require("helmet");
 
 dotenv.config();
@@ -44,12 +44,18 @@ app.use((req, res, next) => {
 });
 
 // ✅ Import Routes
-const authRoutes = require("../routes/authRoutes");
-const indexRoutes = require("../routes"); // Import index.js which registers all routes
+try {
+  const authRoutes = require("../routes/authRoutes");
+  const indexRoutes = require("../routes"); // Import index.js which registers all routes
+  const gameRoutes = require("../routes/gameRoutes"); // new
 
-// ✅ Add Routes
-app.use("/", indexRoutes); // ✅ Root API route
-app.use("/api/auth", authRoutes); // ✅ Authentication routes
+  // ✅ Add Routes
+  app.use("/", indexRoutes); // ✅ Root API route
+  app.use("/api/auth", authRoutes); // ✅ Authentication routes
+  app.use("/api/game", gameRoutes); // For game endpoints
+} catch (error) {
+  console.error("❌ Error loading routes:", error.message);
+}
 
 // ✅ Start Server
 const PORT = process.env.EXPRESS_PORT || 3001;
