@@ -5,43 +5,55 @@ import { getUserProfile, logoutUser } from "../services/authService";
 const Dashboard = ({ userId, sessionToken, onLogout }) => {
   const [username, setUsername] = useState("");
   const [error, setError] = useState("");
-  const navigate = useNavigate(); // ✅ Fix useNavigate error
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!userId || !sessionToken) {
-      console.error("❌ Missing userId or sessionToken");
-      navigate("/"); // ✅ Redirect to login if missing
+      // If missing session data, forcibly redirect
+      window.location.replace("/");
       return;
     }
-
-    const fetchProfile = async () => {
-      const response = await getUserProfile(userId, sessionToken);
-      if (response.success) {
-        setUsername(response.user.username);
-      } else {
-        setError(response.error);
-        console.error("Failed to fetch profile:", response.error);
-      }
-    };
-
     fetchProfile();
-  }, [userId, sessionToken, navigate]);
+  }, [userId, sessionToken]);
+
+  const fetchProfile = async () => {
+    const response = await getUserProfile(userId, sessionToken);
+    if (response.success) {
+      setUsername(response.user.username);
+    } else {
+      setError(response.error);
+      // Forcibly log out on invalid session
+      handleForcedLogout();
+    }
+  };
 
   const handleLogout = async () => {
     const response = await logoutUser(userId, sessionToken);
     if (response.success) {
-      onLogout(); // ✅ Clear session & redirect
-      navigate("/");
+      handleForcedLogout();
     } else {
       setError(response.error);
-      console.error("Logout failed:", response.error);
+      // If invalid token, also forcibly log out
+      if (
+        response.error.includes("Session expired") ||
+        response.error.includes("invalid")
+      ) {
+        handleForcedLogout();
+      }
     }
+  };
+
+  const handleForcedLogout = () => {
+    localStorage.removeItem("userId");
+    localStorage.removeItem("sessionToken");
+    onLogout();
+    window.location.replace("/");
   };
 
   return (
     <div style={{ textAlign: "center", marginTop: "50px" }}>
       <h1>Welcome, {username || "User"}!</h1>
-      {error && <p style={{ color: "red" }}>{error}</p>} {/* ✅ Show errors */}
+      {error && <p style={{ color: "red" }}>{error}</p>}
       <button onClick={handleLogout} style={{ padding: "10px 20px", cursor: "pointer" }}>
         Logout
       </button>

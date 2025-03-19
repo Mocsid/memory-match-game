@@ -1,26 +1,28 @@
 import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { signupUser } from "../services/authService";
 
-const Signup = ({ onSignupSuccess, onSwitchToLogin }) => {
+const Signup = ({ onSignupSuccess }) => {
   const [username, setUsername] = useState("");
   const [deviceId, setDeviceId] = useState("");
   const [ipAddress, setIpAddress] = useState("");
-  const [error, setError] = useState(null);
+  const [error, setError] = useState("");
+  const navigate = useNavigate();
 
+  // Auto-detect Device ID & IP
   useEffect(() => {
-    // Fetch device and IP address dynamically
-    const fetchDeviceInfo = async () => {
-      setDeviceId(navigator.userAgent); // Example for device info
-      const response = await fetch("https://api64.ipify.org?format=json");
-      const data = await response.json();
-      setIpAddress(data.ip);
-    };
-    fetchDeviceInfo();
+    setDeviceId(navigator.userAgent);
+    fetch("https://api64.ipify.org?format=json")
+      .then(res => res.json())
+      .then(data => setIpAddress(data.ip))
+      .catch(() => setIpAddress("Unknown-IP"));
   }, []);
 
   const handleSignup = async (e) => {
     e.preventDefault();
-    if (!username) {
+    setError("");
+
+    if (!username.trim()) {
       setError("Username is required");
       return;
     }
@@ -28,21 +30,35 @@ const Signup = ({ onSignupSuccess, onSwitchToLogin }) => {
     const response = await signupUser(username, deviceId, ipAddress);
     if (response.success) {
       onSignupSuccess(response.userId, response.sessionToken);
+      navigate("/dashboard");
     } else {
-      setError(response.error);
+      setError(response.error || "Signup failed");
     }
+  };
+
+  const handleLoginRedirect = () => {
+    navigate("/");
   };
 
   return (
     <div style={{ textAlign: "center", marginTop: "50px" }}>
-      <h2>Signup</h2>
+      <h1>Sign Up</h1>
       {error && <p style={{ color: "red" }}>{error}</p>}
       <form onSubmit={handleSignup}>
-        <input type="text" placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} />
-        <button type="submit">Signup</button>
+        <input
+          type="text"
+          placeholder="Username"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          required
+        />
+        <button type="submit">Sign Up</button>
       </form>
       <p>
-        Already have an account? <button onClick={onSwitchToLogin}>Login</button>
+        Already have an account?{" "}
+        <button onClick={handleLoginRedirect} style={{ cursor: "pointer" }}>
+          Login
+        </button>
       </p>
     </div>
   );
