@@ -10,18 +10,19 @@ exports.joinQueue = async (req, res) => {
     if (!userId) {
       return res.status(400).json({ error: "Missing userId" });
     }
-
+    
+    // Check waiting queue
     const queueRef = db.ref(WAITING_QUEUE_PATH);
     const snapshot = await queueRef.get();
-
+    
     let waitingUserId = null;
     if (snapshot.exists()) {
       const waitingUsers = snapshot.val();
-      waitingUserId = Object.keys(waitingUsers)[0]; // grab the first user
+      waitingUserId = Object.keys(waitingUsers)[0]; // grab the first waiting user
     }
-
+    
     if (!waitingUserId) {
-      // No one is waiting, add this user to the queue
+      // No one waiting — add this user to the queue
       await db.ref(`${WAITING_QUEUE_PATH}/${userId}`).set({
         userId,
         joinedAt: Date.now(),
@@ -32,30 +33,51 @@ exports.joinQueue = async (req, res) => {
         message: "You are now waiting for an opponent.",
       });
     }
-
+    
     if (waitingUserId === userId) {
       return res.status(400).json({
         error: "You are already in the queue, please wait for an opponent.",
       });
     }
-
-    // Match found - create a match entry for both players
+    
+    // Match found — create a match for both players
     const matchId = `match_${Date.now()}`;
     const players = [waitingUserId, userId];
-
+    const starter = players[Math.floor(Math.random() * players.length)];
+    const board = generateShuffledDeck();
+    
+    // Create match data under /matches/{matchId}
+    const matchData = {
+      players,
+      turn: starter,
+      board,
+      flipped: [],
+      matched: [],
+      lastAction: {
+        type: "init",
+        by: starter,
+        timestamp: Date.now(),
+      },
+      createdAt: Date.now(),
+    };
+    
+    await db.ref(`matches/${matchId}`).set(matchData);
+    console.log("✅ Match initialized at /matches/" + matchId);
+    
+    // Remove the waiting user from the queue
+    await db.ref(`${WAITING_QUEUE_PATH}/${waitingUserId}`).remove();
+    
+    // Update /userMatches for both players with status "ready"
     const updates = {};
     players.forEach((uid) => {
       updates[`${USER_MATCHES_PATH}/${uid}`] = {
         matchId,
         createdAt: Date.now(),
-        status: "waiting", // Optional: useful for frontend
+        status: "ready",
       };
     });
-
-    // Write both users' match and remove the matched user from the queue
     await db.ref().update(updates);
-    await db.ref(`${WAITING_QUEUE_PATH}/${waitingUserId}`).remove();
-
+    
     return res.json({
       success: true,
       matchFound: true,
@@ -74,9 +96,7 @@ exports.cancelQueue = async (req, res) => {
     if (!userId) {
       return res.status(400).json({ error: "Missing userId" });
     }
-
     await db.ref(`${WAITING_QUEUE_PATH}/${userId}`).remove();
-
     return res.json({
       success: true,
       message: "Queue cancelled successfully.",
@@ -86,3 +106,16 @@ exports.cancelQueue = async (req, res) => {
     return res.status(500).json({ error: "Internal server error while cancelling queue." });
   }
 };
+
+function generateShuffledDeck() {
+  const base = [];
+  for (let i = 1; i <= 8; i++) {
+    base.push(i, i); // each card appears twice
+  }
+  // Simple shuffle algorithm
+  for (let i = base.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [base[i], base[j]] = [base[j], base[i]];
+  }
+  return base;
+}

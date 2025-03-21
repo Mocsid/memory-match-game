@@ -14,31 +14,32 @@ const Lobby = ({ userId, sessionToken, onMatchFound }) => {
       console.log("⛔ Not listening - missing userId");
       return;
     }
-  
+    
     console.log("👂 Setting up listener for userMatches/" + userId);
     const matchRef = ref(database, `userMatches/${userId}`);
-  
+    
     const unsubscribe = onValue(matchRef, (snapshot) => {
       console.log("🔥 onValue triggered");
       const data = snapshot.val();
       console.log("🎮 Match data from RTDB:", data);
-      if (data && data.matchId) {
+      // Only navigate if data exists, has a matchId, and status is "ready"
+      if (data && data.matchId && data.status === "ready") {
         setMatchId(data.matchId);
         setMessage("Match found! Redirecting to game...");
         onMatchFound && onMatchFound(data.matchId);
         navigate(`/game/${data.matchId}`);
       }
     });
-  
+    
     return () => unsubscribe();
-  }, [userId]);  
+  }, [userId]);   
 
   const handleJoinQueue = async () => {
     if (!userId) {
       setMessage("Please log in first!");
       return;
     }
-
+  
     try {
       const response = await fetch("http://localhost:3001/api/game/join", {
         method: "POST",
@@ -48,20 +49,20 @@ const Lobby = ({ userId, sessionToken, onMatchFound }) => {
         },
         body: JSON.stringify({ userId }),
       });
-
       const data = await response.json();
-
+  
       if (data.success && !data.matchFound) {
         setMessage(data.message);
         setWaiting(true);
       } else if (data.success && data.matchFound) {
         setMatchId(data.matchId);
         setMessage("Match found! Match ID: " + data.matchId);
-        setWaiting(true); // ✅ IMPORTANT: Activate listener for Player 1
+        setWaiting(true); // ensure listener is active
         onMatchFound && onMatchFound(data.matchId, data.players);
+        navigate(`/game/${data.matchId}`);
       } else {
         if (data.error === "You are already in the queue, please wait for an opponent.") {
-          setWaiting(true); // ✅ ensure Cancel Queue becomes visible
+          setWaiting(true);
         }
         setMessage(data.error || "An error occurred.");
       }
@@ -69,7 +70,7 @@ const Lobby = ({ userId, sessionToken, onMatchFound }) => {
       console.error("Join Queue Error:", error);
       setMessage("Server error while joining queue.");
     }
-  };
+  };  
 
   const handleCancelQueue = async () => {
     try {

@@ -8,23 +8,37 @@ const Dashboard = ({ userId, sessionToken, onLogout }) => {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    // If missing session data, forcibly redirect to login
+    let cancelled = false;
+  
     if (!userId || !sessionToken) {
       window.location.replace("/");
       return;
     }
+  
+    const fetchProfile = async () => {
+      try {
+        console.log("📥 Fetching profile for:", userId);
+        const response = await getUserProfile(userId, sessionToken);
+        if (!cancelled) {
+          if (response.success) {
+            setUsername(response.user.username);
+          } else {
+            setError(response.error || "Failed to load profile.");
+          }
+        }
+      } catch (err) {
+        console.error("Profile Fetch Error:", err);
+        if (!cancelled) setError("An error occurred while fetching profile.");
+      }
+    };
+  
     fetchProfile();
+  
+    return () => {
+      cancelled = true;
+    };
   }, [userId, sessionToken]);
-
-  const fetchProfile = async () => {
-    const response = await getUserProfile(userId, sessionToken);
-    if (response.success) {
-      setUsername(response.user.username);
-    } else {
-      setError(response.error || "Failed to load profile.");
-    }
-  };
-
+  
   // Normal logout (calls logoutUser, then forcibly removes local storage & reloads)
   const handleLogout = async () => {
     const response = await logoutUser(userId, sessionToken);

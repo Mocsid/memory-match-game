@@ -38,11 +38,11 @@ function App() {
   return (
     <Router>
       <Routes>
-        <Route path="/" element={<Login onLoginSuccess={handleLoginSuccess} />} />
+        <Route path="/" element={<Navigate to="/dashboard" />} />
         <Route path="/signup" element={<Signup onSignupSuccess={handleSignupSuccess} />} />
         <Route path="/dashboard" element={userId ? <Dashboard userId={userId} sessionToken={sessionToken} onLogout={handleLogout} /> : <Navigate to="/" />} />
         <Route path="/lobby" element={userId && sessionToken ? <Lobby userId={userId} sessionToken={sessionToken} onMatchFound={handleMatchFound} /> : <Navigate to="/" />} />
-        <Route path="/game/:matchId" element={<Game />} /> ✅ New Game Route
+        <Route path="/game/:matchId" element={<Game />} />
       </Routes>
     </Router>
   );
