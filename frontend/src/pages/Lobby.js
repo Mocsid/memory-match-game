@@ -1,11 +1,38 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { ref, onValue, remove } from "firebase/database";
+import { database } from "../config/firebaseConfig";
 
 const Lobby = ({ userId, sessionToken, onMatchFound }) => {
   const [message, setMessage] = useState("");
   const [matchId, setMatchId] = useState(null);
   const [waiting, setWaiting] = useState(false);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!waiting || !userId) {
+      console.log("⛔ Not listening - missing waiting/userId", waiting, userId);
+      return;
+    }
+  
+    console.log("👂 Setting up listener for userMatches/" + userId);
+  
+    const matchRef = ref(database, `userMatches/${userId}`);
+  
+    const unsubscribe = onValue(matchRef, (snapshot) => {
+      console.log("🔥 onValue triggered");
+      const data = snapshot.val();
+      console.log("🎮 Match data from RTDB:", data);
+      if (data && data.matchId) {
+        setMatchId(data.matchId);
+        setMessage("Match found! Redirecting to game...");
+        onMatchFound && onMatchFound(data.matchId);
+        navigate(`/game/${data.matchId}`);
+      }
+    });
+  
+    return () => unsubscribe();
+  }, [waiting, userId]);  
 
   const handleJoinQueue = async () => {
     if (!userId) {
@@ -22,33 +49,29 @@ const Lobby = ({ userId, sessionToken, onMatchFound }) => {
         },
         body: JSON.stringify({ userId }),
       });
+
       const data = await response.json();
 
       if (data.success && !data.matchFound) {
-        // Successfully joined the queue and no match yet.
         setMessage(data.message);
         setWaiting(true);
       } else if (data.success && data.matchFound) {
-        // Match found!
         setMatchId(data.matchId);
         setMessage("Match found! Match ID: " + data.matchId);
+        setWaiting(true); // ✅ IMPORTANT: Activate listener for Player 1
         onMatchFound && onMatchFound(data.matchId, data.players);
-      } else if (data.error) {
-        // If the error indicates the user is already in the queue, switch to waiting state.
+      } else {
         if (data.error === "You are already in the queue, please wait for an opponent.") {
-          setMessage(data.error);
-          setWaiting(true);
-        } else {
-          setMessage(data.error || "An error occurred while joining queue.");
+          setWaiting(true); // ✅ ensure Cancel Queue becomes visible
         }
+        setMessage(data.error || "An error occurred.");
       }
     } catch (error) {
       console.error("Join Queue Error:", error);
-      setMessage("Failed to join queue, server error.");
+      setMessage("Server error while joining queue.");
     }
   };
 
-  // Function to cancel waiting for a match by notifying the backend.
   const handleCancelQueue = async () => {
     try {
       const response = await fetch("http://localhost:3001/api/game/cancel", {
@@ -59,10 +82,15 @@ const Lobby = ({ userId, sessionToken, onMatchFound }) => {
         },
         body: JSON.stringify({ userId }),
       });
+
       const data = await response.json();
       if (data.success) {
         setWaiting(false);
         setMessage(data.message);
+
+        // 🧹 Optional: clear any lingering match data in RTDB
+        const matchRef = ref(database, `userMatches/${userId}`);
+        await remove(matchRef);
       } else {
         setMessage(data.error || "Failed to cancel queue.");
       }
@@ -72,7 +100,6 @@ const Lobby = ({ userId, sessionToken, onMatchFound }) => {
     }
   };
 
-  // Function to navigate back to the dashboard.
   const handleGoBackToDashboard = () => {
     navigate("/dashboard");
   };

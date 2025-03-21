@@ -4,6 +4,7 @@ import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Dashboard from "./pages/Dashboard";
 import Lobby from "./pages/Lobby"; // ✅ NEW - Add Lobby page
+import Game from "./pages/Game"; // ✅ NEW - Add Game page
 
 function App() {
   const [userId, setUserId] = useState(localStorage.getItem("userId"));
@@ -41,7 +42,7 @@ function App() {
         <Route path="/signup" element={<Signup onSignupSuccess={handleSignupSuccess} />} />
         <Route path="/dashboard" element={userId ? <Dashboard userId={userId} sessionToken={sessionToken} onLogout={handleLogout} /> : <Navigate to="/" />} />
         <Route path="/lobby" element={userId && sessionToken ? <Lobby userId={userId} sessionToken={sessionToken} onMatchFound={handleMatchFound} /> : <Navigate to="/" />} />
-        {/* <Route path="/game/:matchId" element={<Game />} /> ✅ New Game Route */}
+        <Route path="/game/:matchId" element={<Game />} /> ✅ New Game Route
       </Routes>
     </Router>
   );
