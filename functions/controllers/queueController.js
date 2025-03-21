@@ -1,7 +1,6 @@
 const { db } = require("../services/firebaseService");
-const { ref, get, set, remove, update, child } = require("firebase-admin/database");
 
-// RTDB paths
+// Realtime Database paths
 const WAITING_QUEUE_PATH = "waitingQueue";
 const USER_MATCHES_PATH = "userMatches";
 
@@ -12,18 +11,18 @@ exports.joinQueue = async (req, res) => {
       return res.status(400).json({ error: "Missing userId" });
     }
 
-    const queueRef = ref(db, WAITING_QUEUE_PATH);
-    const snapshot = await get(queueRef);
+    const queueRef = db.ref(WAITING_QUEUE_PATH);
+    const snapshot = await queueRef.get();
 
     let waitingUserId = null;
     if (snapshot.exists()) {
       const waitingUsers = snapshot.val();
-      waitingUserId = Object.keys(waitingUsers)[0]; // grab first
+      waitingUserId = Object.keys(waitingUsers)[0]; // grab the first user
     }
 
     if (!waitingUserId) {
-      // No one waiting → add this user to the queue
-      await set(ref(db, `${WAITING_QUEUE_PATH}/${userId}`), {
+      // No one is waiting, add this user to the queue
+      await db.ref(`${WAITING_QUEUE_PATH}/${userId}`).set({
         userId,
         joinedAt: Date.now(),
       });
@@ -40,7 +39,7 @@ exports.joinQueue = async (req, res) => {
       });
     }
 
-    // ✅ Pair with waiting user
+    // Match found - create a match entry for both players
     const matchId = `match_${Date.now()}`;
     const players = [waitingUserId, userId];
 
@@ -49,11 +48,13 @@ exports.joinQueue = async (req, res) => {
       updates[`${USER_MATCHES_PATH}/${uid}`] = {
         matchId,
         createdAt: Date.now(),
+        status: "waiting", // Optional: useful for frontend
       };
     });
 
-    await update(ref(db), updates);
-    await remove(ref(db, `${WAITING_QUEUE_PATH}/${waitingUserId}`));
+    // Write both users' match and remove the matched user from the queue
+    await db.ref().update(updates);
+    await db.ref(`${WAITING_QUEUE_PATH}/${waitingUserId}`).remove();
 
     return res.json({
       success: true,
@@ -74,7 +75,7 @@ exports.cancelQueue = async (req, res) => {
       return res.status(400).json({ error: "Missing userId" });
     }
 
-    await remove(ref(db, `${WAITING_QUEUE_PATH}/${userId}`));
+    await db.ref(`${WAITING_QUEUE_PATH}/${userId}`).remove();
 
     return res.json({
       success: true,

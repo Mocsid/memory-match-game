@@ -10,13 +10,12 @@ const Lobby = ({ userId, sessionToken, onMatchFound }) => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!waiting || !userId) {
-      console.log("⛔ Not listening - missing waiting/userId", waiting, userId);
+    if (!userId) {
+      console.log("⛔ Not listening - missing userId");
       return;
     }
   
     console.log("👂 Setting up listener for userMatches/" + userId);
-  
     const matchRef = ref(database, `userMatches/${userId}`);
   
     const unsubscribe = onValue(matchRef, (snapshot) => {
@@ -32,7 +31,7 @@ const Lobby = ({ userId, sessionToken, onMatchFound }) => {
     });
   
     return () => unsubscribe();
-  }, [waiting, userId]);  
+  }, [userId]);  
 
   const handleJoinQueue = async () => {
     if (!userId) {
@@ -113,9 +112,13 @@ const Lobby = ({ userId, sessionToken, onMatchFound }) => {
           Cancel Queue
         </button>
       ) : (
-        <button onClick={handleJoinQueue} style={{ padding: "10px 20px", cursor: "pointer" }}>
-          Join Queue
-        </button>
+      <button
+        onClick={handleJoinQueue}
+        style={{ padding: "10px 20px", cursor: "pointer" }}
+        disabled={waiting}
+      >
+        Join Queue
+      </button>
       )}
       <button
         onClick={handleGoBackToDashboard}
