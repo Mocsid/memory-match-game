@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { initAuth } from "./utils/authManager";
 import Profile from "./pages/Profile";
 import Scoreboard from "./pages/Scoreboard";
 import Lobby from "./pages/Lobby";
-import { initAuth } from "./utils/authManager";
+import QueueWaiting from "./pages/QueueWaiting";
+import Game from "./pages/Game";
 
 function App() {
   const [isReady, setIsReady] = useState(false);
@@ -28,6 +30,8 @@ function App() {
         <Route path="/" element={<Profile />} />
         <Route path="/scoreboard" element={<Scoreboard />} />
         <Route path="/lobby" element={<Lobby />} />
+        <Route path="/queue" element={<QueueWaiting />} />
+        <Route path="/game/:matchId" element={<Game />} />
       </Routes>
     </Router>
   );
