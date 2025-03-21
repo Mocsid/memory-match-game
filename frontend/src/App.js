@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import Profile from "./pages/Profile";
+import Scoreboard from "./pages/Scoreboard";
 import { initAuth } from "./utils/authManager";
 
 function App() {
@@ -24,7 +25,7 @@ function App() {
     <Router>
       <Routes>
         <Route path="/" element={<Profile />} />
-        {/* Additional routes to come */}
+        <Route path="/scoreboard" element={<Scoreboard />} />
       </Routes>
     </Router>
   );

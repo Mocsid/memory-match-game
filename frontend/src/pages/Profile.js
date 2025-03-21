@@ -1,54 +1,74 @@
 import React, { useEffect, useState } from "react";
-import { onAuthStateChanged } from "firebase/auth";
+import { database } from "../config/firebaseConfig";
 import { ref, onValue } from "firebase/database";
-import { auth, database } from "../config/firebaseConfig";
 
-export default function Profile() {
-  const [profile, setProfile] = useState(null);
+const fruitIcons = {
+  apple: "🍎",
+  banana: "🍌",
+  cherry: "🍒",
+  grape: "🍇",
+  kiwi: "🥝",
+  lemon: "🍋",
+  mango: "🥭",
+  orange: "🍊",
+  peach: "🍑",
+  pear: "🍐",
+  pineapple: "🍍",
+  strawberry: "🍓",
+  watermelon: "🍉",
+};
+
+const Profile = () => {
+  const userId = localStorage.getItem("userId");
+  const [userData, setUserData] = useState(null);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      if (!user) return;
-      const userRef = ref(database, `users/${user.uid}`);
-      onValue(userRef, (snap) => {
-        if (snap.exists()) {
-          setProfile(snap.val());
-        }
-      });
-    });
-    return () => unsubscribe();
-  }, []);
+    if (!userId) return;
 
-  if (!profile) {
-    return (
-      <div className="flex justify-center items-center h-screen text-lg text-gray-600">
-        Loading profile...
-      </div>
-    );
+    const userRef = ref(database, `users/${userId}`);
+    const unsubscribe = onValue(userRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) setUserData(data);
+    });
+
+    return () => unsubscribe();
+  }, [userId]);
+
+  if (!userData) {
+    return <div className="text-center mt-10 text-gray-600">Loading profile...</div>;
   }
 
-  const { username, wins = 0, losses = 0 } = profile;
-  const games = wins + losses;
+  const { username, wins = 0, losses = 0 } = userData;
+  const totalGames = wins + losses;
+
+  const fruit = username.split("_")[1] || "";
+  const icon = fruitIcons[fruit] || "🎮";
 
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col items-center pt-12 px-4">
-      <div className="bg-white shadow-lg rounded-2xl p-8 w-full max-w-md">
-        <h1 className="text-2xl font-bold text-center mb-4 capitalize">{username}</h1>
-        <div className="grid grid-cols-3 gap-4 text-center text-sm">
+    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-gray-700 text-white p-6">
+      <div className="bg-gray-800 rounded-xl shadow-lg p-8 w-full max-w-md text-center">
+        <h1 className="text-3xl font-bold mb-4">Welcome</h1>
+        <p className="text-xl mb-6">
+          <span className="text-green-300 font-semibold">{username}</span> {icon}
+        </p>
+
+        <div className="grid grid-cols-3 gap-4 text-center mt-4">
           <div>
-            <p className="text-gray-600">Wins</p>
-            <p className="text-lg font-semibold">{wins}</p>
+            <p className="text-sm text-gray-400">Wins</p>
+            <p className="text-2xl font-semibold text-green-400">{wins}</p>
           </div>
           <div>
-            <p className="text-gray-600">Losses</p>
-            <p className="text-lg font-semibold">{losses}</p>
+            <p className="text-sm text-gray-400">Losses</p>
+            <p className="text-2xl font-semibold text-red-400">{losses}</p>
           </div>
           <div>
-            <p className="text-gray-600">Total Games</p>
-            <p className="text-lg font-semibold">{games}</p>
+            <p className="text-sm text-gray-400">Total Games</p>
+            <p className="text-2xl font-semibold text-blue-400">{totalGames}</p>
           </div>
         </div>
       </div>
     </div>
   );
-}
+};
+
+export default Profile;
