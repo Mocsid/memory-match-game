@@ -1,71 +1,102 @@
-// ./functions/controllers/authController.js
+// ./functions/controllers/authController.js (RTDB version with lowercase color_fruit usernames)
 const admin = require("firebase-admin");
-const db = admin.firestore();
+const db = admin.database();
 const crypto = require("crypto");
 const rateLimit = require("express-rate-limit");
 
-// ✅ Rate Limiting: Prevent brute-force attacks on login
+// Rate limiter to prevent abuse
 const loginLimiter = rateLimit({
-  windowMs: 1 * 60 * 100, // 10 minutes
-  max: 100, // Max 5 login attempts per IP
+  windowMs: 1 * 60 * 1000,
+  max: 100,
   message: { error: "Too many login attempts. Please try again later." },
 });
 
-// ✅ Generates secure session token
+// Generate secure session token
 const generateSessionToken = () => crypto.randomBytes(32).toString("hex");
 
-// ✅ Creates a new session with expiration
+// Create session object
 const createSession = () => {
   const sessionToken = generateSessionToken();
-  const sessionExpires = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+  const sessionExpires = Date.now() + 24 * 60 * 60 * 1000;
   return { sessionToken, sessionExpires };
 };
 
-// ✅ Signup (New User)
-exports.signupUser = async (req, res) => {
-  const { username, deviceId, ipAddress } = req.body;
+// List of colors and fruits for username generation
+const colors = [
+  "red", "blue", "green", "yellow", "orange", "purple", "pink",
+  "cyan", "lime", "teal", "brown", "gray", "black", "white"
+];
 
-  if (!username || !deviceId || !ipAddress) {
-    return res.status(400).json({ error: "Missing fields" });
+const fruits = [
+  "apple", "banana", "mango", "grape", "peach", "cherry", "plum",
+  "kiwi", "lemon", "melon", "berry", "papaya", "orange", "fig"
+];
+
+// Helper to generate a username like "blue_apple"
+const generateUsername = () => {
+  const color = colors[Math.floor(Math.random() * colors.length)];
+  const fruit = fruits[Math.floor(Math.random() * fruits.length)];
+  return `${color}_${fruit}`;
+};
+
+// Signup with unique generated username
+exports.signupUser = async (req, res) => {
+  const { deviceId, ipAddress } = req.body;
+
+  if (!deviceId || !ipAddress) {
+    return res.status(400).json({ error: "Missing device or IP" });
   }
 
   try {
-    // 🔹 Check if username is taken
-    const users = await db.collection("users").where("username", "==", username).get();
-    if (!users.empty) {
-      return res.status(409).json({ error: "Username already exists" });
+    const usersRef = db.ref("users");
+    let username;
+    let attempts = 0;
+    let isTaken = true;
+
+    while (isTaken && attempts < 20) {
+      attempts++;
+      username = generateUsername();
+      const snap = await usersRef.orderByChild("username").equalTo(username).once("value");
+      if (!snap.exists()) {
+        isTaken = false;
+      }
     }
 
-    // 🔹 Create user session
+    if (isTaken) {
+      return res.status(500).json({ error: "Could not generate unique username" });
+    }
+
+    const newUserRef = usersRef.push();
+    const userId = newUserRef.key;
     const { sessionToken, sessionExpires } = createSession();
-    const newUserProfile = {
+
+    const newUser = {
       username,
       deviceId,
       ipAddress,
       sessionToken,
-      sessionExpires: sessionExpires.toISOString(),
-      createdAt: new Date().toISOString(),
+      sessionExpires,
+      createdAt: Date.now(),
     };
 
-    // 🔹 Store user in Firestore
-    const userRef = await db.collection("users").add(newUserProfile);
+    await newUserRef.set(newUser);
 
     return res.json({
       success: true,
-      userId: userRef.id,
+      userId,
+      username,
       sessionToken,
-      sessionExpires: sessionExpires.toISOString(),
+      sessionExpires,
     });
-
-  } catch (error) {
-    console.error("Signup Error:", error);
+  } catch (err) {
+    console.error("Signup Error (RTDB):", err);
     res.status(500).json({ error: "An error occurred during signup." });
   }
 };
 
-// ✅ Login (Existing User)
+// Login using device and IP matching
 exports.loginUser = async (req, res) => {
-  loginLimiter(req, res, async () => { // Apply rate limiter
+  loginLimiter(req, res, async () => {
     const { username, deviceId, ipAddress } = req.body;
 
     if (!username || !deviceId || !ipAddress) {
@@ -73,45 +104,43 @@ exports.loginUser = async (req, res) => {
     }
 
     try {
-      const users = await db.collection("users").where("username", "==", username).get();
-      if (users.empty) {
+      const usersRef = db.ref("users");
+      const snapshot = await usersRef.orderByChild("username").equalTo(username).once("value");
+
+      if (!snapshot.exists()) {
         return res.status(404).json({ error: "User not found" });
       }
 
-      // 🔹 Ensure only one user exists
-      const userDoc = users.docs[0];
-      const userData = userDoc.data();
-      const userId = userDoc.id;
+      const userId = Object.keys(snapshot.val())[0];
+      const userData = snapshot.val()[userId];
 
-      // 🔹 Validate device ID and IP
       if (userData.deviceId !== deviceId || userData.ipAddress !== ipAddress) {
         return res.status(403).json({ error: "Login not allowed from this device or IP" });
       }
 
-      // 🔹 Create new session, invalidate old one
       const { sessionToken, sessionExpires } = createSession();
-      await db.collection("users").doc(userId).update({
+      await db.ref(`users/${userId}`).update({
         sessionToken,
-        sessionExpires: sessionExpires.toISOString(),
-        deviceId, // Update device info
-        ipAddress, // Update IP info
+        sessionExpires,
+        deviceId,
+        ipAddress,
       });
 
       return res.json({
         success: true,
-        userId: userId,
+        userId,
+        username,
         sessionToken,
-        sessionExpires: sessionExpires.toISOString(),
+        sessionExpires,
       });
-
-    } catch (error) {
-      console.error("Login Error:", error);
+    } catch (err) {
+      console.error("Login Error (RTDB):", err);
       res.status(500).json({ error: "An error occurred during login." });
     }
   });
 };
 
-// ✅ Get User Profile (Requires Authentication)
+// Get profile by user ID and token
 exports.getUserProfile = async (req, res) => {
   const { userId } = req.params;
   const { authorization } = req.headers;
@@ -120,46 +149,44 @@ exports.getUserProfile = async (req, res) => {
     return res.status(400).json({ error: "User ID and authorization token are required" });
   }
 
-  const tokenParts = authorization.split(' ');
-  if (tokenParts.length !== 2 || tokenParts[0] !== 'Bearer') {
+  const tokenParts = authorization.split(" ");
+  if (tokenParts.length !== 2 || tokenParts[0] !== "Bearer") {
     return res.status(401).json({ error: "Invalid authorization format" });
   }
+
   const sessionToken = tokenParts[1];
 
   try {
-    const userDoc = await db.collection("users").doc(userId).get();
-    if (!userDoc.exists) {
+    const snapshot = await db.ref(`users/${userId}`).once("value");
+    if (!snapshot.exists()) {
       return res.status(404).json({ error: "User not found" });
     }
 
-    const userData = userDoc.data();
+    const userData = snapshot.val();
 
-    // 🔹 Validate session token
     if (userData.sessionToken !== sessionToken) {
       return res.status(401).json({ error: "Invalid session token" });
     }
 
-    // 🔹 Check session expiration
-    if (new Date(userData.sessionExpires) < new Date()) {
+    if (Date.now() > userData.sessionExpires) {
       return res.status(401).json({ error: "Session expired" });
     }
 
-    res.json({
+    return res.json({
       success: true,
       user: {
-        userId: userId,
+        userId,
         username: userData.username,
         createdAt: userData.createdAt,
       },
     });
-
-  } catch (error) {
-    console.error("Get User Profile Error:", error);
+  } catch (err) {
+    console.error("Get User Profile Error (RTDB):", err);
     res.status(500).json({ error: "An error occurred while fetching the profile." });
   }
 };
 
-// ✅ Logout User
+// Logout clears session values
 exports.logoutUser = async (req, res) => {
   const { userId } = req.params;
   const { authorization } = req.headers;
@@ -168,40 +195,34 @@ exports.logoutUser = async (req, res) => {
     return res.status(400).json({ error: "User ID and authorization token are required" });
   }
 
-  const tokenParts = authorization.split(' ');
-  if (tokenParts.length !== 2 || tokenParts[0] !== 'Bearer') {
+  const tokenParts = authorization.split(" ");
+  if (tokenParts.length !== 2 || tokenParts[0] !== "Bearer") {
     return res.status(401).json({ error: "Invalid authorization format" });
   }
+
   const sessionToken = tokenParts[1];
 
   try {
-    const userRef = db.collection("users").doc(userId);
-    const userDoc = await userRef.get();
+    const userRef = db.ref(`users/${userId}`);
+    const snapshot = await userRef.once("value");
 
-    if (!userDoc.exists) {
-      console.error(`Logout Error: User not found for userId: ${userId}`);
+    if (!snapshot.exists()) {
       return res.status(404).json({ error: "User not found" });
     }
 
-    const userData = userDoc.data();
-
-    // 🔹 Validate session token before logout
+    const userData = snapshot.val();
     if (userData.sessionToken !== sessionToken) {
-      console.error(`Logout Error: Invalid token for userId: ${userId}`);
       return res.status(401).json({ error: "Invalid session token" });
     }
 
-    // 🔹 Invalidate session
     await userRef.update({
       sessionToken: "",
-      sessionExpires: new Date(0).toISOString(),
+      sessionExpires: 0,
     });
 
-    console.log(`User ${userId} logged out successfully.`);
-    res.json({ success: true, message: "Logged out successfully" });
-
-  } catch (error) {
-    console.error("Logout Error:", error);
+    return res.json({ success: true, message: "Logged out successfully" });
+  } catch (err) {
+    console.error("Logout Error (RTDB):", err);
     res.status(500).json({ error: "An internal server error occurred during logout." });
   }
 };
