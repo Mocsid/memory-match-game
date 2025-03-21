@@ -3,8 +3,8 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-d
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import Dashboard from "./pages/Dashboard";
-import Lobby from "./pages/Lobby"; // ✅ NEW - Add Lobby page
-import Game from "./pages/Game"; // ✅ NEW - Add Game page
+import Lobby from "./pages/Lobby";
+import Game from "./pages/Game";
 
 function App() {
   const [userId, setUserId] = useState(localStorage.getItem("userId"));
@@ -28,21 +28,48 @@ function App() {
     setSessionToken(null);
   };
 
-  // ✅ Add handleMatchFound function to process match results
+  // ✅ Used for /game/:matchId redirection when match is found
   const handleMatchFound = (matchId, players) => {
     console.log("Match found! Match ID:", matchId, "Players:", players);
-    // Example: Navigate to the game page in the future
-    // navigate(`/game/${matchId}`);
+    // Navigation will happen inside Lobby, this is for optional logic
   };
 
   return (
     <Router>
       <Routes>
-        <Route path="/" element={<Navigate to="/dashboard" />} />
+        {/* ✅ Redirect / to dashboard if logged in */}
+        <Route path="/" element={
+          userId && sessionToken ? <Navigate to="/dashboard" replace /> : <Login onLoginSuccess={handleLoginSuccess} />
+        } />
+        
         <Route path="/signup" element={<Signup onSignupSuccess={handleSignupSuccess} />} />
-        <Route path="/dashboard" element={userId ? <Dashboard userId={userId} sessionToken={sessionToken} onLogout={handleLogout} /> : <Navigate to="/" />} />
-        <Route path="/lobby" element={userId && sessionToken ? <Lobby userId={userId} sessionToken={sessionToken} onMatchFound={handleMatchFound} /> : <Navigate to="/" />} />
-        <Route path="/game/:matchId" element={<Game />} />
+
+        <Route
+          path="/dashboard"
+          element={
+            userId && sessionToken
+              ? <Dashboard userId={userId} sessionToken={sessionToken} onLogout={handleLogout} />
+              : <Navigate to="/" replace />
+          }
+        />
+
+        <Route
+          path="/lobby"
+          element={
+            userId && sessionToken
+              ? <Lobby userId={userId} sessionToken={sessionToken} onMatchFound={handleMatchFound} />
+              : <Navigate to="/" replace />
+          }
+        />
+
+        <Route
+          path="/game/:matchId"
+          element={
+            localStorage.getItem("userId") && localStorage.getItem("sessionToken")
+              ? <Game />
+              : <Navigate to="/" replace />
+          }
+        />
       </Routes>
     </Router>
   );

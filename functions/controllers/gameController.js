@@ -114,3 +114,35 @@ exports.cancelQueue = async (req, res) => {
         res.status(500).json({ success: false, error: "Failed to cancel queue." });
     }
 };
+
+exports.leaveMatch = async (req, res) => {
+    const { userId, matchId } = req.body;
+    if (!userId || !matchId) {
+      return res.status(400).json({ error: "Missing userId or matchId" });
+    }
+  
+    const dbRef = db.ref(`matches/${matchId}`);
+    const snapshot = await dbRef.get();
+  
+    if (!snapshot.exists()) {
+      return res.status(404).json({ error: "Match not found" });
+    }
+  
+    const match = snapshot.val();
+    const remainingPlayer = match.players.find((id) => id !== userId);
+  
+    // Mark result and delete match
+    const updates = {
+      [`matches/${matchId}`]: null,
+      [`userMatches/${userId}`]: null,
+      [`userMatches/${remainingPlayer}`]: null,
+      [`results/${matchId}`]: {
+        winner: remainingPlayer,
+        loser: userId,
+        timestamp: Date.now(),
+      },
+    };
+  
+    await db.ref().update(updates);
+    return res.json({ success: true, message: "Match ended, winner decided", winner: remainingPlayer });
+  };  

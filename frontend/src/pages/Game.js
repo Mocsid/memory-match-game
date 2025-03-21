@@ -1,41 +1,66 @@
 import React, { useEffect, useState, useRef } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { database } from "../config/firebaseConfig";
-import { ref, onValue, update } from "firebase/database";
+import { ref, onValue, update, onDisconnect, remove } from "firebase/database";
 
 const Game = () => {
   const { matchId } = useParams();
+  const navigate = useNavigate();
   const userId = localStorage.getItem("userId");
 
   const [gameData, setGameData] = useState(null);
   const [logs, setLogs] = useState([]);
   const [usernameMap, setUsernameMap] = useState({});
-  
-  // ✅ Keep track of which player IDs we've already fetched
   const fetchedPlayersRef = useRef(new Set());
   const previousTurnRef = useRef(null);
 
-  // 1) Listen for match changes
+  // ✅ PRESENCE: track when player leaves
+  useEffect(() => {
+    if (!matchId || !userId) return;
+    const presenceRef = ref(database, `matches/${matchId}/presence/${userId}`);
+    const onlineRef = ref(database, `.info/connected`);
+
+    const off = onValue(onlineRef, (snap) => {
+      if (snap.val() === true) {
+        onDisconnect(presenceRef).remove(); // remove when disconnected
+        update(presenceRef, {
+          online: true,
+          lastSeen: Date.now(),
+        });
+      }
+    });
+
+    return () => {
+      // Clean up
+      remove(presenceRef);
+    };
+  }, [matchId, userId]);
+
+  // 🔁 Match Listener
   useEffect(() => {
     if (!matchId) return;
 
     const matchRef = ref(database, `matches/${matchId}`);
     const unsubscribe = onValue(matchRef, (snapshot) => {
       const data = snapshot.val();
-      if (data) {
-        // Safeguards
-        if (!data.flipped) data.flipped = [];
-        if (!data.matched) data.matched = [];
-
-        setGameData(data);
-        handleGameLog(data);
+      if (!data) {
+        console.log("⚠️ Match deleted.");
+        navigate("/dashboard");
+        return;
       }
+
+      // Safeguard
+      data.flipped = data.flipped || [];
+      data.matched = data.matched || [];
+
+      setGameData(data);
+      handleGameLog(data);
     });
 
     return () => unsubscribe();
   }, [matchId]);
 
-  // 2) Fetch usernames only once per userId
+  // 👤 Username Fetching
   useEffect(() => {
     if (!gameData?.players) return;
 
@@ -43,11 +68,8 @@ const Game = () => {
       (uid) => !fetchedPlayersRef.current.has(uid)
     );
 
-    if (newPlayers.length === 0) {
-      return; // No new players to fetch
-    }
+    if (newPlayers.length === 0) return;
 
-    // Mark them as fetched right away to avoid repeated requests
     newPlayers.forEach((uid) => fetchedPlayersRef.current.add(uid));
 
     const fetchUsernames = async () => {
@@ -60,20 +82,18 @@ const Game = () => {
         )
       );
 
-      // Build local map of uid => username
       const map = {};
       results.forEach((r) => {
         map[r.uid] = r.username;
       });
 
-      // Merge with existing usernameMap
       setUsernameMap((prev) => ({ ...prev, ...map }));
     };
 
     fetchUsernames();
   }, [gameData?.players]);
 
-  // 3) Handle flipping a card
+  // 🔄 Handle Card Flip
   const handleCardClick = async (index) => {
     if (!gameData || gameData.turn !== userId) return;
     if (gameData.flipped.includes(index) || gameData.matched.includes(index)) return;
@@ -111,53 +131,59 @@ const Game = () => {
         updates.turn = otherPlayer;
       }
 
-      // small delay
       setTimeout(() => {
         update(ref(database, `matches/${matchId}`), updates);
       }, 1000);
     }
   };
 
-  // 4) Logs only changes in lastAction or turn
-  const handleGameLog = (data) => {
-    const { lastAction } = data;
-    const logMessages = [];
-    const getName = (uid) => usernameMap[uid] || uid;
+  useEffect(() => {
+    if (gameData?.status === "completed") {
+      alert("Game ended. Returning to lobby.");
+      window.location.href = "/lobby";
+    }
+  }, [gameData?.status]);  
 
-    // Show last action if any
+  const handleGameLog = (data) => {
+    const logMessages = [];
+    const { lastAction } = data;
+    const getName = (uid) => usernameMap?.[uid] ?? uid;
+
     if (lastAction) {
       const { type, by, card, matchSuccess } = lastAction;
-      const playerName = getName(by);
+      const name = getName(by);
 
-      if (type === "flip") {
-        logMessages.push(`🃏 ${playerName} flipped card ${card}`);
-      } else if (type === "match") {
-        if (matchSuccess) {
-          logMessages.push(`✅ ${playerName} made a match and continues!`);
-        } else {
-          logMessages.push(`❌ ${playerName} failed to match. Turn passed.`);
-        }
+      if (type === "flip") logMessages.push(`🃏 ${name} flipped card ${card}`);
+      if (type === "match") {
+        logMessages.push(
+          matchSuccess
+            ? `✅ ${name} made a match and continues!`
+            : `❌ ${name} failed to match. Turn passed.`
+        );
       }
     }
 
-    // Only log turn changes
     if (data.turn && data.turn !== previousTurnRef.current) {
       previousTurnRef.current = data.turn;
       logMessages.push(`🎮 It's ${getName(data.turn)}'s turn`);
     }
 
-    // limit logs to last 20
     setLogs((prev) => [...prev.slice(-20), ...logMessages]);
   };
 
-  // 5) Render board
   const renderBoard = () => {
-    if (!gameData || !Array.isArray(gameData.board)) {
-      return <p>Loading board...</p>;
-    }
+    if (!gameData || !Array.isArray(gameData.board)) return <p>Loading board...</p>;
 
     return (
-      <div className="game-board" style={{ display: "grid", gridTemplateColumns: "repeat(4, 60px)", gap: "10px", justifyContent: "center" }}>
+      <div
+        className="game-board"
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4, 60px)",
+          gap: "10px",
+          justifyContent: "center",
+        }}
+      >
         {gameData.board.map((card, index) => {
           const isFlipped = gameData.flipped.includes(index);
           const isMatched = gameData.matched.includes(index);
@@ -175,7 +201,11 @@ const Game = () => {
                 alignItems: "center",
                 justifyContent: "center",
                 cursor: isFlipped || isMatched ? "default" : "pointer",
-                backgroundColor: isMatched ? "green" : isFlipped ? "lightblue" : "gray",
+                backgroundColor: isMatched
+                  ? "green"
+                  : isFlipped
+                  ? "lightblue"
+                  : "gray",
                 fontSize: "20px",
               }}
             >
@@ -187,21 +217,66 @@ const Game = () => {
     );
   };
 
+  const handleLeave = async () => {
+    if (!matchId || !userId) return;
+    try {
+      await fetch(`http://localhost:3001/api/match/leave`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ matchId, userId }),
+      });
+      navigate("/dashboard");
+    } catch (err) {
+      console.error("❌ Leave match error:", err);
+    }
+  };
+
+  const handleLeaveGame = async () => {
+    const confirmed = window.confirm("Are you sure you want to leave the game?");
+    if (!confirmed) return;
+  
+    try {
+      const response = await fetch("http://localhost:3001/api/match/leave", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ userId, matchId }),
+      });
+  
+      const data = await response.json();
+      if (data.success) {
+        alert("You have left the game.");
+        window.location.href = "/dashboard"; // or use navigate()
+      } else {
+        alert("Failed to leave game: " + data.error);
+      }
+    } catch (err) {
+      console.error("Leave error:", err);
+      alert("An error occurred while leaving the game.");
+    }
+  };
+  
+
   return (
     <div style={{ padding: "20px", textAlign: "center" }}>
       <h2>🧠 Memory Match</h2>
       <p>Match ID: {matchId}</p>
 
       {gameData?.turn && (
-        <h3>
-          🎮 Current Turn:{" "}
-          {usernameMap[gameData.turn] || gameData.turn}
-        </h3>
+        <h3>🎮 Current Turn: {usernameMap[gameData.turn] || gameData.turn}</h3>
       )}
 
       {renderBoard()}
 
-      <div style={{ marginTop: "30px", textAlign: "left", maxWidth: "600px", margin: "0 auto" }}>
+      <div
+        style={{
+          marginTop: "30px",
+          textAlign: "left",
+          maxWidth: "600px",
+          marginInline: "auto",
+        }}
+      >
         <h4>Logs:</h4>
         <ul>
           {logs.map((log, i) => (
@@ -209,6 +284,14 @@ const Game = () => {
           ))}
         </ul>
       </div>
+
+      <button
+        onClick={handleLeaveGame}
+        style={{ marginTop: "20px", padding: "10px 20px", background: "crimson", color: "#fff", border: "none", borderRadius: "5px", cursor: "pointer" }}
+      >
+        Leave Game
+      </button>
+      
     </div>
   );
 };

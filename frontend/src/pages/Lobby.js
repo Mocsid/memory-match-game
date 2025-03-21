@@ -34,6 +34,28 @@ const Lobby = ({ userId, sessionToken, onMatchFound }) => {
     return () => unsubscribe();
   }, [userId]);   
 
+  useEffect(() => {
+    const checkUserMatch = async () => {
+      const userMatchRef = ref(database, `userMatches/${userId}`);
+      onValue(userMatchRef, (snapshot) => {
+        const data = snapshot.val();
+        if (data?.matchId) {
+          // Avoid redirecting to old match if already completed
+          const matchRef = ref(database, `matches/${data.matchId}`);
+          onValue(matchRef, (matchSnap) => {
+            const matchData = matchSnap.val();
+            if (matchData?.status === "completed") {
+              // Clean up lingering userMatches entry
+              remove(userMatchRef);
+            }
+          });
+        }
+      });
+    };
+  
+    checkUserMatch();
+  }, [userId]);  
+
   const handleJoinQueue = async () => {
     if (!userId) {
       setMessage("Please log in first!");
