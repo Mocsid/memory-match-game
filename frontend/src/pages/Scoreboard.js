@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { database } from "../config/firebaseConfig";
 import { ref, get } from "firebase/database";
 import { useNavigate } from "react-router-dom";
+import MainNav from "../components/MainNav";
 
 const fruitIcons = {
   apple: "🍎",
@@ -64,6 +65,8 @@ const Scoreboard = () => {
     .slice(0, 10);
 
   return (
+    <>
+    <MainNav />
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-700 text-white">
       {/* Navigation */}
       <nav className="bg-gray-800 px-6 py-4 flex justify-between items-center shadow-md">
@@ -137,6 +140,7 @@ const Scoreboard = () => {
         </div>
       </div>
     </div>
+    </>
   );
 };
 

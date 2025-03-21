@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { database } from "../config/firebaseConfig";
 import { ref, onValue } from "firebase/database";
+import MainNav from "../components/MainNav";
 
 const fruitIcons = {
   apple: "🍎",
@@ -45,6 +46,8 @@ const Profile = () => {
   const icon = fruitIcons[fruit] || "🎮";
 
   return (
+    <>
+    <MainNav />
     <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-gray-700 text-white p-6">
       <div className="bg-gray-800 rounded-xl shadow-lg p-8 w-full max-w-md text-center">
         <h1 className="text-3xl font-bold mb-4">Welcome</h1>
@@ -68,6 +71,7 @@ const Profile = () => {
         </div>
       </div>
     </div>
+    </>
   );
 };
 
