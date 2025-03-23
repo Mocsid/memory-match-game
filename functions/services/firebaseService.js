@@ -6,22 +6,30 @@ dotenv.config();
 
 let firebaseApp;
 
-// ✅ Ensure Firebase is only initialized once
+// ✅ Only initialize if not already initialized
 if (!admin.apps.length) {
-    const serviceAccount = JSON.parse(fs.readFileSync("./firebase-service-account.json", "utf8"));
+  try {
+    // Try to use local service account (for development only)
+    const serviceAccount = JSON.parse(
+      fs.readFileSync("./firebase-service-account.json", "utf8")
+    );
 
     firebaseApp = admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
-        databaseURL: process.env.FIREBASE_DATABASE_URL,
+      credential: admin.credential.cert(serviceAccount),
+      databaseURL: process.env.DB_URL,
     });
 
-    console.log("✅ Firebase Admin Initialized Successfully");
+    console.log("✅ Firebase Admin initialized with service account");
+  } catch (err) {
+    // Fallback for production — use default credentials provided by Firebase Functions
+    firebaseApp = admin.initializeApp();
+    console.log("✅ Firebase Admin initialized with default credentials");
+  }
 } else {
-    firebaseApp = admin.app();
-    console.log("⚠️ Firebase Admin Already Initialized, Using Existing Instance");
+  firebaseApp = admin.app();
+  console.log("⚠️ Firebase Admin already initialized");
 }
 
-// ✅ Export Firebase Services
 const db = admin.database();
 const auth = admin.auth();
 

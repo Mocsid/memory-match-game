@@ -7,6 +7,7 @@ import Lobby from "./pages/Lobby";
 import QueueWaiting from "./pages/QueueWaiting";
 import Game from "./pages/Game";
 import GameSummary from "./pages/GameSummary";
+import "./i18n";
 
 
 function App() {

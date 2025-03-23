@@ -13,8 +13,10 @@ import { database } from "../config/firebaseConfig";
 import MainNav from "../components/MainNav";
 import flipSound from "../assets/sounds/flip.wav";
 import matchSound from "../assets/sounds/match.wav";
+import { useTranslation } from "react-i18next";
 
 const Game = () => {
+  const { t } = useTranslation();
   const { matchId } = useParams();
   const navigate = useNavigate();
   const userId = localStorage.getItem("userId");
@@ -241,7 +243,7 @@ const Game = () => {
   if (!matchData) {
     return (
       <div className="h-screen flex justify-center items-center text-white">
-        Loading game...
+        {t("loadingGame", "Loading game...")}
       </div>
     );
   }
@@ -256,7 +258,7 @@ const Game = () => {
   ) {
     return (
       <div className="h-screen flex justify-center items-center text-white">
-        Waiting for both players to connect...
+        {t("waitingForBothPlayers", "Waiting for both players to connect...")}
       </div>
     );
   }
@@ -266,7 +268,6 @@ const Game = () => {
   const opponentId = (players || []).find((id) => id !== userId);
 
   const handleLeaveGame = () => {
-    // Do NOT manually remove presence — onDisconnect handles it
     navigate("/");
   };
 
@@ -276,13 +277,17 @@ const Game = () => {
       <div className="min-h-screen flex flex-col items-center justify-center text-white bg-gray-900">
         <h2 className="text-2xl mb-2">
           {isMyTurn
-            ? `Your turn (${myUsername})`
-            : `Waiting for opponent (${opponentUsername})`}
+            ? t("yourTurn", { username: myUsername })
+            : t("waitingForOpponent", { username: opponentUsername })}
         </h2>
 
         <p className="text-lg mb-4">
-          Score: {myUsername} - {flipCounts[userId] || 0} | {opponentUsername} -{" "}
-          {flipCounts[opponentId] || 0}
+          {t("score", {
+            me: myUsername,
+            meScore: flipCounts[userId] || 0,
+            opponent: opponentUsername,
+            opponentScore: flipCounts[opponentId] || 0,
+          })}
         </p>
 
         <div className="grid grid-cols-4 gap-4">
@@ -307,7 +312,7 @@ const Game = () => {
           onClick={handleLeaveGame}
           className="mt-6 px-4 py-2 bg-red-600 rounded hover:bg-red-700"
         >
-          Leave Game
+          {t("leaveGame")}
         </button>
       </div>
     </>

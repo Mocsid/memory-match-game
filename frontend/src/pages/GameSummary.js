@@ -3,8 +3,10 @@ import { useParams, useNavigate } from "react-router-dom";
 import { ref, get } from "firebase/database";
 import { database } from "../config/firebaseConfig";
 import MainNav from "../components/MainNav";
+import { useTranslation } from "react-i18next";
 
 const GameSummary = () => {
+  const { t } = useTranslation();
   const { matchId } = useParams();
   const navigate = useNavigate();
   const userId = localStorage.getItem("userId");
@@ -42,7 +44,7 @@ const GameSummary = () => {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">
-        Loading summary...
+        {t("loadingSummary", "Loading summary...")}
       </div>
     );
   }
@@ -50,7 +52,7 @@ const GameSummary = () => {
   if (!matchData) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white">
-        Match not found or already removed.
+        {t("matchNotFound", "Match not found or already removed.")}
       </div>
     );
   }
@@ -72,25 +74,32 @@ const GameSummary = () => {
     userFlipCount === 0 &&
     players.length === 2;
 
-  let resultMessage = "💀 You Lost";
+  let resultMessage = t("youLost", "💀 You Lost");
 
   if (userLeft) {
-    resultMessage = "💀 You left the game. You lost.";
+    resultMessage = t("youLeftLost", "💀 You left the game. You lost.");
   } else if (isDraw) {
-    resultMessage = "🤝 It's a Draw!";
+    resultMessage = t("draw", "🤝 It's a Draw!");
   } else if (isWinner) {
-    resultMessage = "🎉 You Won!";
+    resultMessage = t("youWon", "🎉 You Won!");
   }
 
   const opponentMessage = userLeft
-    ? `${opponentData.username || "Opponent"} wins because you left.`
-    : `${opponentData.username || "Opponent"} flipped ${opponentFlipCount} cards.`;
+    ? t("opponentWinsBecauseLeft", {
+        opponent: opponentData.username || t("opponent", "Opponent"),
+      })
+    : t("opponentFlipped", {
+        opponent: opponentData.username || t("opponent", "Opponent"),
+        count: opponentFlipCount,
+      });
 
   return (
     <>
       <MainNav />
       <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-700 text-white px-4 py-10 flex flex-col items-center">
-        <h1 className="text-3xl font-bold mb-4">Game Summary</h1>
+        <h1 className="text-3xl font-bold mb-4">
+          {t("gameSummary", "Game Summary")}
+        </h1>
 
         <div className="bg-gray-800 p-6 rounded-xl shadow-lg max-w-md w-full text-center">
           <h2
@@ -106,9 +115,9 @@ const GameSummary = () => {
           </h2>
 
           <p className="mb-2">
-            You flipped{" "}
-            <span className="font-bold text-yellow-300">{userFlipCount}</span>{" "}
-            cards.
+            {t("youFlippedCards", {
+              count: userFlipCount,
+            })}
           </p>
 
           <p className="mb-4">{opponentMessage}</p>
@@ -117,7 +126,7 @@ const GameSummary = () => {
             onClick={() => navigate("/lobby")}
             className="mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded"
           >
-            Return to Lobby
+            {t("returnToLobby", "Return to Lobby")}
           </button>
         </div>
       </div>

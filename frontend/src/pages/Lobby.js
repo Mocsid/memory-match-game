@@ -4,9 +4,11 @@ import { ref, set, remove, onValue, get, onDisconnect } from "firebase/database"
 import { useNavigate } from "react-router-dom";
 import MainNav from "../components/MainNav";
 import { joinQueue } from "../services/matchmakingService";
+import { useTranslation } from "react-i18next";
 
 const Lobby = () => {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const userId = localStorage.getItem("userId");
   const [onlinePlayers, setOnlinePlayers] = useState([]);
   const [usernames, setUsernames] = useState({});
@@ -57,10 +59,10 @@ const Lobby = () => {
       <MainNav />
       <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-700 text-white">
         <div className="flex flex-col items-center justify-center p-8">
-          <h2 className="text-2xl font-semibold mb-4">Online Players</h2>
+          <h2 className="text-2xl font-semibold mb-4">{t("onlinePlayers")}</h2>
 
           {onlinePlayers.length === 0 ? (
-            <p className="text-gray-400">No players online</p>
+            <p className="text-gray-400">{t("noPlayersOnline")}</p>
           ) : (
             <ul className="bg-gray-800 rounded-md p-4 shadow-md w-full max-w-md space-y-2">
               {onlinePlayers.map((id) => (
@@ -70,8 +72,8 @@ const Lobby = () => {
                     id === userId ? "text-blue-400 font-bold" : "text-green-300"
                   }`}
                 >
-                  {usernames[id] || "loading..."}
-                  {id === userId && " (You)"}
+                  {usernames[id] || t("loading")}
+                  {id === userId && ` (${t("you")})`}
                 </li>
               ))}
             </ul>
@@ -81,7 +83,7 @@ const Lobby = () => {
             onClick={handleJoinGame}
             className="mt-6 bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-white"
           >
-            Join Game
+            {t("joinGame")}
           </button>
         </div>
       </div>
