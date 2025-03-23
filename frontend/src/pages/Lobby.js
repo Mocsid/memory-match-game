@@ -1,12 +1,9 @@
-// src/pages/Lobby.js
 import React, { useEffect, useState } from "react";
 import { database } from "../config/firebaseConfig";
 import { ref, set, remove, onValue, get, onDisconnect } from "firebase/database";
 import { useNavigate } from "react-router-dom";
 import MainNav from "../components/MainNav";
 import { joinQueue } from "../services/matchmakingService";
-
-const t = (text) => text;
 
 const Lobby = () => {
   const navigate = useNavigate();
@@ -28,23 +25,18 @@ const Lobby = () => {
     const allPresenceRef = ref(database, "presence");
     const unsubscribe = onValue(allPresenceRef, async (snapshot) => {
       const presence = snapshot.val() || {};
-      const otherIds = Object.keys(presence).filter((id) => id !== userId);
-      setOnlinePlayers(otherIds);
+      const ids = Object.keys(presence);
+      setOnlinePlayers(ids);
 
-      // Fetch usernames for all online players
+      // Get usernames
       const updates = {};
       await Promise.all(
-        otherIds.map(async (uid) => {
+        ids.map(async (uid) => {
           const userRef = ref(database, `users/${uid}/username`);
           const snap = await get(userRef);
-          if (snap.exists()) {
-            updates[uid] = snap.val();
-          } else {
-            updates[uid] = "unknown_user";
-          }
+          updates[uid] = snap.exists() ? snap.val() : "unknown_user";
         })
       );
-
       setUsernames((prev) => ({ ...prev, ...updates }));
     });
 
@@ -53,11 +45,10 @@ const Lobby = () => {
 
   const handleJoinGame = async () => {
     const result = await joinQueue(userId);
-    navigate("/queue");
     if (result.matchId) {
       navigate(`/game/${result.matchId}`);
     } else {
-      alert("Waiting for another player to join...");
+      navigate("/queue");
     }
   };
 
@@ -66,15 +57,21 @@ const Lobby = () => {
       <MainNav />
       <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-700 text-white">
         <div className="flex flex-col items-center justify-center p-8">
-          <h2 className="text-2xl font-semibold mb-4">{t("Online Players")}</h2>
+          <h2 className="text-2xl font-semibold mb-4">Online Players</h2>
 
           {onlinePlayers.length === 0 ? (
-            <p className="text-gray-400">{t("No other players online")}</p>
+            <p className="text-gray-400">No players online</p>
           ) : (
             <ul className="bg-gray-800 rounded-md p-4 shadow-md w-full max-w-md space-y-2">
               {onlinePlayers.map((id) => (
-                <li key={id} className="text-sm text-green-300 truncate">
+                <li
+                  key={id}
+                  className={`text-sm truncate ${
+                    id === userId ? "text-blue-400 font-bold" : "text-green-300"
+                  }`}
+                >
                   {usernames[id] || "loading..."}
+                  {id === userId && " (You)"}
                 </li>
               ))}
             </ul>
