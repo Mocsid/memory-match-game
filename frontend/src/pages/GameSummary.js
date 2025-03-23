@@ -1,3 +1,5 @@
+// FILE: frontend/src/pages/GameSummary.js
+
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ref, get } from "firebase/database";
@@ -7,21 +9,38 @@ import MainNav from "../components/MainNav";
 const GameSummary = () => {
   const { matchId } = useParams();
   const navigate = useNavigate();
-  const [matchData, setMatchData] = useState(null);
-  const [loading, setLoading] = useState(true);
   const userId = localStorage.getItem("userId");
+
+  const [matchData, setMatchData] = useState(null);
+  const [userData, setUserData] = useState({});
+  const [opponentData, setOpponentData] = useState({});
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const matchRef = ref(database, `matches/${matchId}`);
-    get(matchRef).then((snapshot) => {
-      if (snapshot.exists()) {
-        setMatchData(snapshot.val());
-      } else {
-        console.warn("Match not found in summary page");
+    get(matchRef).then(async (snapshot) => {
+      if (!snapshot.exists()) {
+        setLoading(false);
+        return;
       }
+      const data = snapshot.val();
+      const players = data.players || [];
+
+      // Grab the opponent
+      const opponentId = players.find((id) => id !== userId);
+
+      // Fetch user + opponent data
+      const [userSnap, opponentSnap] = await Promise.all([
+        get(ref(database, `users/${userId}`)),
+        get(ref(database, `users/${opponentId}`)),
+      ]);
+
+      setMatchData(data);
+      setUserData(userSnap.val() || {});
+      setOpponentData(opponentSnap.val() || {});
       setLoading(false);
     });
-  }, [matchId]);
+  }, [matchId, userId]);
 
   if (loading) {
     return (
@@ -42,11 +61,32 @@ const GameSummary = () => {
   const winnerId = matchData.winner;
   const players = matchData.players || [];
   const flipCounts = matchData.flipCounts || {};
+
   const userFlipCount = flipCounts[userId] || 0;
-  const opponentId = players.find((id) => id !== userId);
+  const opponentId = players.find((id) => id !== userId) || "";
   const opponentFlipCount = flipCounts[opponentId] || 0;
 
+  // Decide if user is the winner
   const isWinner = winnerId === userId;
+
+  // Check if user left quickly (0 flips) and the other is winner
+  const userLeft =
+    matchData.status === "completed" &&
+    !isWinner &&
+    userFlipCount === 0 &&
+    players.length === 2;
+
+  const resultMessage = userLeft
+    ? "💀 You left the game. You lost."
+    : isWinner
+    ? "🎉 You Won!"
+    : "💀 You Lost";
+
+  // If userLeft is true, opponent “wins because you left” message
+  // Otherwise show normal flip stats message
+  const opponentMessage = userLeft
+    ? `${opponentData.username || "Opponent"} wins because you left.`
+    : `${opponentData.username || "Opponent"} flipped ${opponentFlipCount} cards.`;
 
   return (
     <>
@@ -55,12 +95,21 @@ const GameSummary = () => {
         <h1 className="text-3xl font-bold mb-4">Game Summary</h1>
 
         <div className="bg-gray-800 p-6 rounded-xl shadow-lg max-w-md w-full text-center">
-          <h2 className={`text-2xl mb-2 ${isWinner ? "text-green-400" : "text-red-400"}`}>
-            {isWinner ? "🎉 You Won!" : "💀 You Lost"}
+          <h2
+            className={`text-2xl mb-2 ${
+              isWinner ? "text-green-400" : "text-red-400"
+            }`}
+          >
+            {resultMessage}
           </h2>
 
-          <p className="mb-2">You flipped <span className="font-bold text-yellow-300">{userFlipCount}</span> cards.</p>
-          <p className="mb-4">Opponent flipped <span className="font-bold text-yellow-300">{opponentFlipCount}</span> cards.</p>
+          <p className="mb-2">
+            You flipped{" "}
+            <span className="font-bold text-yellow-300">{userFlipCount}</span>{" "}
+            cards.
+          </p>
+
+          <p className="mb-4">{opponentMessage}</p>
 
           <button
             onClick={() => navigate("/lobby")}

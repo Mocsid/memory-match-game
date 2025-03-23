@@ -1,7 +1,5 @@
-// FILE: frontend/src/pages/Game.js
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { database } from "../config/firebaseConfig";
 import {
   ref,
   onValue,
@@ -12,6 +10,7 @@ import {
   off,
   get,
 } from "firebase/database";
+import { database } from "../config/firebaseConfig";
 import MainNav from "../components/MainNav";
 import flipSound from "../assets/sounds/flip.wav";
 import matchSound from "../assets/sounds/match.wav";
@@ -26,6 +25,7 @@ const Game = () => {
   const [matchedIndexes, setMatchedIndexes] = useState([]);
   const [myUsername, setMyUsername] = useState("You");
   const [opponentUsername, setOpponentUsername] = useState("Opponent");
+  const [presenceReady, setPresenceReady] = useState(false);
 
   const flipSFX = new Audio(flipSound);
   const matchSFX = new Audio(matchSound);
@@ -38,13 +38,11 @@ const Game = () => {
     set(presenceRef, { online: true, lastSeen: Date.now() });
 
     return () => {
-      remove(presenceRef);
+      // No removal here to prevent early false disconnect
     };
   }, [matchId, userId]);
 
-  // Fetch usernames
   useEffect(() => {
-    if (!matchId || !userId) return;
     const usersRef = ref(database, "users");
     get(usersRef).then((snapshot) => {
       const users = snapshot.val();
@@ -57,17 +55,18 @@ const Game = () => {
 
         const players = data.players || [];
         const opponentId = players.find((id) => id !== userId);
+
         if (users[userId]) setMyUsername(users[userId].username);
-        if (opponentId && users[opponentId]) setOpponentUsername(users[opponentId].username);
+        if (opponentId && users[opponentId]) {
+          setOpponentUsername(users[opponentId].username);
+        }
       });
     });
   }, [matchId, userId]);
 
-  // Listen to match updates
   useEffect(() => {
-    if (!matchId) return;
-
     const matchRef = ref(database, `matches/${matchId}`);
+
     const unsub = onValue(matchRef, async (snapshot) => {
       const data = snapshot.val();
       if (!data) {
@@ -82,27 +81,29 @@ const Game = () => {
       const players = data.players || [];
       const presence = data.presence || {};
 
-      if (data.status === "completed" && data.winner) {
+      const allPlayersPresent = players.every(
+        (uid) => presence[uid]?.online === true
+      );
+
+      if (!presenceReady && allPlayersPresent) {
+        console.log("[Presence] All players online. Starting monitoring.");
+        setPresenceReady(true);
+      }
+
+      if (data.status === "completed") {
         setTimeout(() => {
           navigate(`/summary/${matchId}`);
-        }, 2000);
+        }, 1000);
         return;
       }
 
-      // All cards matched
       if ((data.matched?.length || 0) === 16 && data.status === "active") {
         const flipCounts = data.flipCounts || {};
-        const winner =
-          (flipCounts[players[0]] || 0) > (flipCounts[players[1]] || 0)
-            ? players[0]
-            : players[1];
-
+        const [p1, p2] = players;
+        const p1Flips = flipCounts[p1] || 0;
+        const p2Flips = flipCounts[p2] || 0;
+        const winner = p1Flips > p2Flips ? p1 : p2;
         const loser = players.find((uid) => uid !== winner);
-
-        await update(ref(database, `matches/${matchId}`), {
-          status: "completed",
-          winner,
-        });
 
         const winnerRef = ref(database, `users/${winner}`);
         const loserRef = ref(database, `users/${loser}`);
@@ -115,72 +116,85 @@ const Game = () => {
         const winnerData = winnerSnap.val() || {};
         const loserData = loserSnap.val() || {};
 
+        await update(ref(database, `matches/${matchId}`), {
+          status: "completed",
+          winner,
+        });
+
         await Promise.all([
           update(winnerRef, {
             wins: (winnerData.wins || 0) + 1,
-            username: winnerData.username || `unknown_${winner}`,
+            games: (winnerData.games || 0) + 1,
           }),
           update(loserRef, {
             losses: (loserData.losses || 0) + 1,
-            username: loserData.username || `unknown_${loser}`,
+            games: (loserData.games || 0) + 1,
           }),
         ]);
-
-        setTimeout(() => {
-          navigate(`/summary/${matchId}`);
-        }, 2000);
 
         return;
       }
 
-      // Player left handling
+      // ✅ Only handle presence disconnect after both players were confirmed online
       if (
+        presenceReady &&
         data.status === "active" &&
         players.length === 2 &&
-        Object.keys(presence).length === 2 &&
         players.some((uid) => !presence[uid]?.online)
       ) {
         const leaver = players.find((uid) => !presence[uid]?.online);
-        const other = players.find((uid) => uid !== leaver);
+        const winner = players.find((uid) => uid !== leaver);
 
-        setTimeout(async () => {
-          const check = await get(ref(database, `matches/${matchId}/presence`));
-          const stillGone = !check.val()?.[leaver]?.online;
-          if (stillGone) {
-            await update(ref(database, `matches/${matchId}`), {
-              status: "completed",
-              winner: other,
-            });
+        const winnerRef = ref(database, `users/${winner}`);
+        const loserRef = ref(database, `users/${leaver}`);
 
-            const [winnerSnap, loserSnap] = await Promise.all([
-              get(ref(database, `users/${other}`)),
-              get(ref(database, `users/${leaver}`)),
-            ]);
+        const [winnerSnap, loserSnap] = await Promise.all([
+          get(winnerRef),
+          get(loserRef),
+        ]);
 
-            const winnerData = winnerSnap.val() || {};
-            const loserData = loserSnap.val() || {};
+        const winnerData = winnerSnap.val() || {};
+        const loserData = loserSnap.val() || {};
 
-            await Promise.all([
-              update(ref(database, `users/${other}`), {
-                wins: (winnerData.wins || 0) + 1,
-                username: winnerData.username || `unknown_${other}`,
-              }),
-              update(ref(database, `users/${leaver}`), {
-                losses: (loserData.losses || 0) + 1,
-                username: loserData.username || `unknown_${leaver}`,
-              }),
-            ]);
+        await update(ref(database, `matches/${matchId}`), {
+          status: "completed",
+          winner,
+        });
 
-            navigate(`/summary/${matchId}`);
-          }
-        }, 3000);
+        await Promise.all([
+          update(winnerRef, {
+            wins: (winnerData.wins || 0) + 1,
+            games: (winnerData.games || 0) + 1,
+          }),
+          update(loserRef, {
+            losses: (loserData.losses || 0) + 1,
+            games: (loserData.games || 0) + 1,
+          }),
+        ]);
+
+        return;
       }
     });
 
     return () => {
       off(matchRef);
+      unsub();
     };
-  }, [matchId, navigate, userId]);
+  }, [matchId, navigate, presenceReady]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const matchRef = ref(database, `matches/${matchId}`);
+      get(matchRef).then((snap) => {
+        const data = snap.val();
+        if (data?.status === "completed") {
+          navigate(`/summary/${matchId}`);
+        }
+      });
+    }, 5000);
+
+    return () => clearTimeout(timer);
+  }, [matchId, navigate]);
 
   const isMyTurn = matchData?.turn === userId;
 
@@ -188,8 +202,8 @@ const Game = () => {
     if (!matchData || !isMyTurn) return;
     if (flippedIndexes.includes(index) || matchedIndexes.includes(index)) return;
 
-    const updatedFlipped = [...flippedIndexes, index];
     flipSFX.play();
+    const updatedFlipped = [...flippedIndexes, index];
 
     await update(ref(database, `matches/${matchId}`), {
       flipped: updatedFlipped,
@@ -221,7 +235,11 @@ const Game = () => {
   };
 
   if (!matchData) {
-    return <div className="h-screen flex justify-center items-center text-white">Loading game...</div>;
+    return (
+      <div className="h-screen flex justify-center items-center text-white">
+        Loading game...
+      </div>
+    );
   }
 
   const players = matchData.players || [];
@@ -232,11 +250,20 @@ const Game = () => {
     players.length === 2 &&
     Object.keys(presence).length < 2
   ) {
-    return <div className="h-screen flex justify-center items-center text-white">Waiting for both players to connect...</div>;
+    return (
+      <div className="h-screen flex justify-center items-center text-white">
+        Waiting for both players to connect...
+      </div>
+    );
   }
 
   const isMatched = (i) => matchedIndexes.includes(i);
   const isFlipped = (i) => flippedIndexes.includes(i);
+
+  const handleLeaveGame = () => {
+    remove(ref(database, `matches/${matchId}/presence/${userId}`));
+    navigate("/");
+  };
 
   return (
     <>
@@ -267,10 +294,7 @@ const Game = () => {
         </div>
 
         <button
-          onClick={() => {
-            remove(ref(database, `matches/${matchId}/presence/${userId}`));
-            navigate("/");
-          }}
+          onClick={handleLeaveGame}
           className="mt-6 px-4 py-2 bg-red-600 rounded hover:bg-red-700"
         >
           Leave Game
