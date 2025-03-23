@@ -267,9 +267,17 @@ const Game = () => {
   const isFlipped = (i) => flippedIndexes.includes(i);
   const opponentId = (players || []).find((id) => id !== userId);
 
-  const handleLeaveGame = () => {
-    navigate("/");
-  };
+  const handleLeaveGame = async () => {
+    const presenceRef = ref(database, `matches/${matchId}/presence/${userId}`);
+  
+    // Explicitly remove presence to simulate disconnect
+    await set(presenceRef, null);
+  
+    // Give Firebase time to propagate the removal
+    setTimeout(() => {
+      navigate(`/summary/${matchId}`);
+    }, 1000);
+  };  
 
   return (
     <>
