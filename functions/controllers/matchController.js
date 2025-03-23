@@ -2,6 +2,7 @@ const { db } = require("../services/firebaseService");
 const { v4: uuidv4 } = require("uuid");
 
 exports.joinQueue = async (req, res) => {
+  console.log("🔍 joinQueue");
   const { userId } = req.body;
   if (!userId) return res.status(400).json({ error: "Missing userId" });
 
