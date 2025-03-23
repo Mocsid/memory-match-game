@@ -1,307 +1,321 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import {
+  ref,
+  onValue,
+  set,
+  update,
+  onDisconnect,
+  off,
+  get,
+} from "firebase/database";
 import { database } from "../config/firebaseConfig";
-import { ref, onValue, update, onDisconnect, remove } from "firebase/database";
+import MainNav from "../components/MainNav";
+import flipSound from "../assets/sounds/flip.wav";
+import matchSound from "../assets/sounds/match.wav";
+import { useTranslation } from "react-i18next";
 
 const Game = () => {
+  const { t } = useTranslation();
   const { matchId } = useParams();
   const navigate = useNavigate();
   const userId = localStorage.getItem("userId");
-  const sessionToken = localStorage.getItem("sessionToken");
 
-  const [gameData, setGameData] = useState(null);
-  const [logs, setLogs] = useState([]);
-  const [usernameMap, setUsernameMap] = useState({});
-  const fetchedPlayersRef = useRef(new Set());
-  const previousTurnRef = useRef(null);
+  const [matchData, setMatchData] = useState(null);
+  const [flippedIndexes, setFlippedIndexes] = useState([]);
+  const [matchedIndexes, setMatchedIndexes] = useState([]);
+  const [flipCounts, setFlipCounts] = useState({});
+  const [myUsername, setMyUsername] = useState("You");
+  const [opponentUsername, setOpponentUsername] = useState("Opponent");
+  const [presenceReady, setPresenceReady] = useState(false);
 
-  // Fallback to a short-UID if usernameMap missing
-  const getName = (uid) => {
-    // If we have a real username, return it
-    if (usernameMap[uid] && usernameMap[uid] !== uid) {
-      return usernameMap[uid];
-    }
-    // Otherwise fallback to first 6 chars of UID
-    if (uid && uid.length > 6) {
-      return uid.slice(0, 6);
-    }
-    return uid || "???";
-  };
+  const flipSFX = new Audio(flipSound);
+  const matchSFX = new Audio(matchSound);
 
-  // ✅ Presence (player leaves)
   useEffect(() => {
     if (!matchId || !userId) return;
 
     const presenceRef = ref(database, `matches/${matchId}/presence/${userId}`);
-    const connectedRef = ref(database, ".info/connected");
+    onDisconnect(presenceRef).remove();
+    set(presenceRef, { online: true, lastSeen: Date.now() });
 
-    const off = onValue(connectedRef, (snap) => {
-      if (snap.val()) {
-        onDisconnect(presenceRef).remove();
-        update(presenceRef, {
-          online: true,
-          lastSeen: Date.now(),
+    return () => {
+      off(presenceRef);
+    };
+  }, [matchId, userId]);
+
+  useEffect(() => {
+    const usersRef = ref(database, "users");
+    get(usersRef).then((snapshot) => {
+      const users = snapshot.val();
+      if (!users) return;
+
+      const matchRef = ref(database, `matches/${matchId}`);
+      get(matchRef).then((snap) => {
+        const data = snap.val();
+        if (!data) return;
+
+        const players = data.players || [];
+        const opponentId = players.find((id) => id !== userId);
+
+        if (users[userId]) setMyUsername(users[userId].username);
+        if (opponentId && users[opponentId]) {
+          setOpponentUsername(users[opponentId].username);
+        }
+      });
+    });
+  }, [matchId, userId]);
+
+  useEffect(() => {
+    const matchRef = ref(database, `matches/${matchId}`);
+
+    const unsub = onValue(matchRef, async (snapshot) => {
+      const data = snapshot.val();
+      if (!data) {
+        navigate("/");
+        return;
+      }
+
+      setMatchData(data);
+      setFlippedIndexes(data.flipped || []);
+      setMatchedIndexes(data.matched || []);
+      setFlipCounts(data.flipCounts || {});
+
+      const players = data.players || [];
+      const presence = data.presence || {};
+
+      const allPlayersPresent = players.every(
+        (uid) => presence[uid]?.online === true
+      );
+
+      if (!presenceReady && allPlayersPresent) {
+        setPresenceReady(true);
+      }
+
+      if (data.status === "completed") {
+        setTimeout(() => {
+          navigate(`/summary/${matchId}`);
+        }, 1000);
+        return;
+      }
+
+      if ((data.matched?.length || 0) === 16 && data.status === "active") {
+        const [p1, p2] = players;
+        const p1Flips = data.flipCounts?.[p1] || 0;
+        const p2Flips = data.flipCounts?.[p2] || 0;
+        const isDraw = p1Flips === p2Flips;
+
+        const winner = isDraw ? null : p1Flips > p2Flips ? p1 : p2;
+        const loser = isDraw ? null : players.find((uid) => uid !== winner);
+
+        const p1Ref = ref(database, `users/${p1}`);
+        const p2Ref = ref(database, `users/${p2}`);
+        const [p1Snap, p2Snap] = await Promise.all([get(p1Ref), get(p2Ref)]);
+        const p1Data = p1Snap.val() || {};
+        const p2Data = p2Snap.val() || {};
+
+        await update(ref(database, `matches/${matchId}`), {
+          status: "completed",
+          winner,
+          isDraw,
         });
+
+        await Promise.all([
+          update(p1Ref, {
+            games: (p1Data.games || 0) + 1,
+            ...(isDraw
+              ? {}
+              : winner === p1
+              ? { wins: (p1Data.wins || 0) + 1 }
+              : { losses: (p1Data.losses || 0) + 1 }),
+          }),
+          update(p2Ref, {
+            games: (p2Data.games || 0) + 1,
+            ...(isDraw
+              ? {}
+              : winner === p2
+              ? { wins: (p2Data.wins || 0) + 1 }
+              : { losses: (p2Data.losses || 0) + 1 }),
+          }),
+        ]);
+
+        return;
+      }
+
+      if (
+        presenceReady &&
+        data.status === "active" &&
+        players.length === 2 &&
+        players.some((uid) => !presence[uid]?.online)
+      ) {
+        const leaver = players.find((uid) => !presence[uid]?.online);
+        const winner = players.find((uid) => uid !== leaver);
+
+        const winnerRef = ref(database, `users/${winner}`);
+        const loserRef = ref(database, `users/${leaver}`);
+        const [winnerSnap, loserSnap] = await Promise.all([
+          get(winnerRef),
+          get(loserRef),
+        ]);
+
+        const winnerData = winnerSnap.val() || {};
+        const loserData = loserSnap.val() || {};
+
+        await update(ref(database, `matches/${matchId}`), {
+          status: "completed",
+          winner,
+          isDraw: false,
+        });
+
+        await Promise.all([
+          update(winnerRef, {
+            wins: (winnerData.wins || 0) + 1,
+            games: (winnerData.games || 0) + 1,
+          }),
+          update(loserRef, {
+            losses: (loserData.losses || 0) + 1,
+            games: (loserData.games || 0) + 1,
+          }),
+        ]);
+
+        return;
       }
     });
 
     return () => {
-      remove(presenceRef);
-      off();
+      off(matchRef);
+      unsub();
     };
-  }, [matchId, userId]);
+  }, [matchId, navigate, presenceReady]);
 
-  // 🔁 Listen to match data
   useEffect(() => {
-    if (!matchId) return;
-
-    const matchRef = ref(database, `matches/${matchId}`);
-    const unsub = onValue(matchRef, (snap) => {
-      const data = snap.val();
-      if (!data) {
-        console.log("⚠️ Match deleted");
-        navigate("/dashboard");
-        return;
-      }
-      data.flipped = data.flipped || [];
-      data.matched = data.matched || [];
-
-      setGameData(data);
-      handleGameLog(data);
-    });
-
-    return () => unsub();
-  }, [matchId]);
-
-  // 👤 Username fetch for new players
-  useEffect(() => {
-    if (!gameData?.players) return;
-
-    const newPlayers = gameData.players.filter(
-      (uid) => !fetchedPlayersRef.current.has(uid)
-    );
-    if (!newPlayers || newPlayers.length === 0) return;
-
-    // Mark them as fetched
-    newPlayers.forEach((uid) => fetchedPlayersRef.current.add(uid));
-
-    const fetchUsernames = async () => {
-      const results = await Promise.all(
-        newPlayers.map((uid) =>
-          fetch(`http://localhost:3001/api/auth/profile/${uid}`, {
-            headers: {
-              Authorization: `Bearer ${sessionToken}`,
-            },
-          })
-            .then((res) => res.json())
-            .then((data) => ({
-              uid,
-              username: data?.user?.username || uid,
-            }))
-            .catch(() => ({ uid, username: uid }))
-        )
-      );
-
-      const newMap = {};
-      results.forEach((r) => {
-        newMap[r.uid] = r.username;
+    const timer = setTimeout(() => {
+      const matchRef = ref(database, `matches/${matchId}`);
+      get(matchRef).then((snap) => {
+        const data = snap.val();
+        if (data?.status === "completed") {
+          navigate(`/summary/${matchId}`);
+        }
       });
+    }, 5000);
 
-      setUsernameMap((prev) => ({ ...prev, ...newMap }));
-    };
+    return () => clearTimeout(timer);
+  }, [matchId, navigate]);
 
-    fetchUsernames();
-  }, [gameData?.players, sessionToken]);
+  const isMyTurn = matchData?.turn === userId;
 
-  // 🔄 Card flip
   const handleCardClick = async (index) => {
-    if (!gameData || gameData.turn !== userId) return;
-    if (gameData.flipped.includes(index) || gameData.matched.includes(index)) return;
+    if (!matchData || !isMyTurn) return;
+    if (flippedIndexes.includes(index) || matchedIndexes.includes(index)) return;
 
-    const flipped = [...gameData.flipped, index];
+    flipSFX.play();
+    const updatedFlipped = [...flippedIndexes, index];
 
     await update(ref(database, `matches/${matchId}`), {
-      flipped,
-      lastAction: {
-        type: "flip",
-        by: userId,
-        card: index,
-        timestamp: Date.now(),
-      },
+      flipped: updatedFlipped,
     });
 
-    // if two cards flipped, evaluate
-    if (flipped.length === 2) {
-      const [i1, i2] = flipped;
-      const matchSuccess = gameData.board[i1] === gameData.board[i2];
+    if (updatedFlipped.length === 2) {
+      const [i1, i2] = updatedFlipped;
+      const isMatch = matchData.board[i1] === matchData.board[i2];
+      if (isMatch) matchSFX.play();
 
-      const updates = {
+      await new Promise((res) => setTimeout(res, 1000));
+
+      const newMatched = isMatch ? [...matchedIndexes, i1, i2] : matchedIndexes;
+      const newFlipCount = isMatch
+        ? (matchData.flipCounts?.[userId] || 0) + 1
+        : matchData.flipCounts?.[userId] || 0;
+
+      const turn = isMatch
+        ? userId
+        : matchData.players.find((id) => id !== userId);
+
+      await update(ref(database, `matches/${matchId}`), {
         flipped: [],
-        lastAction: {
-          type: "match",
-          by: userId,
-          matchSuccess,
-          timestamp: Date.now(),
-        },
-      };
-
-      if (matchSuccess) {
-        updates.matched = [...gameData.matched, i1, i2];
-      } else {
-        const otherPlayer = gameData.players.find((p) => p !== userId);
-        updates.turn = otherPlayer;
-      }
-
-      setTimeout(() => {
-        update(ref(database, `matches/${matchId}`), updates);
-      }, 1000);
+        matched: newMatched,
+        turn,
+        [`flipCounts/${userId}`]: newFlipCount,
+      });
     }
   };
 
-  // If game is done
-  useEffect(() => {
-    if (gameData?.status === "completed") {
-      alert("Game ended. Returning to lobby.");
-      window.location.href = "/lobby";
-    }
-  }, [gameData?.status]);
-
-  // Additional fetch if new players show up
-  useEffect(() => {
-    if (!gameData?.players) return;
-    const missing = gameData.players.filter((p) => !usernameMap[p]);
-    if (missing.length > 0) {
-      // fetch them again if needed...
-    }
-  }, [gameData?.players, usernameMap]);
-
-  // 📝 Logging
-  const handleGameLog = (data) => {
-    const logMessages = [];
-    const { lastAction } = data;
-
-    if (lastAction) {
-      const { type, by, card, matchSuccess } = lastAction;
-      const name = getName(by);
-      if (type === "flip") {
-        logMessages.push(`🃏 ${name} flipped card ${card}`);
-      } else if (type === "match") {
-        if (matchSuccess) {
-          logMessages.push(`✅ ${name} made a match and continues!`);
-        } else {
-          logMessages.push(`❌ ${name} failed to match. Turn passed.`);
-        }
-      }
-    }
-
-    if (data.turn && data.turn !== previousTurnRef.current) {
-      previousTurnRef.current = data.turn;
-      const turnName = getName(data.turn);
-      logMessages.push(`🎮 It's ${turnName}'s turn`);
-    }
-
-    if (logMessages.length > 0) {
-      setLogs((prev) => [...prev.slice(-20), ...logMessages]);
-    }
-  };
-
-  // Render cards
-  const renderBoard = () => {
-    if (!gameData?.board) return <p>Loading board...</p>;
-
+  if (!matchData) {
     return (
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 60px)", gap: "10px", justifyContent: "center" }}>
-        {gameData.board.map((val, idx) => {
-          const isFlipped = gameData.flipped.includes(idx);
-          const isMatched = gameData.matched.includes(idx);
-          return (
-            <div
-              key={idx}
-              onClick={() => handleCardClick(idx)}
-              style={{
-                width: "60px",
-                height: "60px",
-                border: "1px solid #ccc",
-                borderRadius: "8px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                cursor: isFlipped || isMatched ? "default" : "pointer",
-                backgroundColor: isMatched
-                  ? "green"
-                  : isFlipped
-                  ? "lightblue"
-                  : "gray",
-                fontSize: "20px",
-              }}
-            >
-              {isFlipped || isMatched ? val : "?"}
-            </div>
-          );
-        })}
+      <div className="h-screen flex justify-center items-center text-white">
+        {t("loadingGame", "Loading game...")}
       </div>
     );
-  };
+  }
 
-  const handleLeaveGame = async () => {
-    const confirmed = window.confirm("Are you sure you want to leave?");
-    if (!confirmed) return;
-    try {
-      const res = await fetch("http://localhost:3001/api/match/leave", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ userId, matchId }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert("You have left the game.");
-        window.location.href = "/dashboard";
-      } else {
-        alert("Failed to leave game: " + data.error);
-      }
-    } catch (err) {
-      console.error("Leave error:", err);
-      alert("Error leaving match.");
-    }
+  const players = matchData.players || [];
+  const presence = matchData.presence || {};
+
+  if (
+    matchData.status === "active" &&
+    players.length === 2 &&
+    Object.keys(presence).length < 2
+  ) {
+    return (
+      <div className="h-screen flex justify-center items-center text-white">
+        {t("waitingForBothPlayers", "Waiting for both players to connect...")}
+      </div>
+    );
+  }
+
+  const isMatched = (i) => matchedIndexes.includes(i);
+  const isFlipped = (i) => flippedIndexes.includes(i);
+  const opponentId = (players || []).find((id) => id !== userId);
+
+  const handleLeaveGame = () => {
+    navigate("/");
   };
 
   return (
-    <div style={{ padding: "20px", textAlign: "center" }}>
-      <h2>🧠 Memory Match</h2>
-      <p>Match ID: {matchId}</p>
+    <>
+      <MainNav />
+      <div className="min-h-screen flex flex-col items-center justify-center text-white bg-gray-900">
+        <h2 className="text-2xl mb-2">
+          {isMyTurn
+            ? t("yourTurn", { username: myUsername })
+            : t("waitingForOpponent", { username: opponentUsername })}
+        </h2>
 
-      {gameData?.turn && (
-        <h3>🎮 Current Turn: {getName(gameData.turn)}</h3>
-      )}
+        <p className="text-lg mb-4">
+          {t("score", {
+            me: myUsername,
+            meScore: flipCounts[userId] || 0,
+            opponent: opponentUsername,
+            opponentScore: flipCounts[opponentId] || 0,
+          })}
+        </p>
 
-      {renderBoard()}
-
-      <div style={{ marginTop: "30px", textAlign: "left", maxWidth: "600px", margin: "0 auto" }}>
-        <h4>Logs:</h4>
-        <ul>
-          {logs.map((log, i) => (
-            <li key={i}>{log}</li>
+        <div className="grid grid-cols-4 gap-4">
+          {matchData.board.map((emoji, index) => (
+            <div
+              key={index}
+              onClick={() => handleCardClick(index)}
+              className={`w-16 h-16 flex items-center justify-center text-2xl rounded-md cursor-pointer ${
+                isMatched(index)
+                  ? "bg-green-600"
+                  : isFlipped(index)
+                  ? "bg-blue-500"
+                  : "bg-gray-600 hover:bg-gray-500"
+              }`}
+            >
+              {isMatched(index) || isFlipped(index) ? emoji : "❓"}
+            </div>
           ))}
-        </ul>
-      </div>
+        </div>
 
-      <button
-        onClick={handleLeaveGame}
-        style={{
-          marginTop: "20px",
-          padding: "10px 20px",
-          backgroundColor: "crimson",
-          color: "#fff",
-          border: "none",
-          borderRadius: "5px",
-          cursor: "pointer",
-        }}
-      >
-        Leave Game
-      </button>
-    </div>
+        <button
+          onClick={handleLeaveGame}
+          className="mt-6 px-4 py-2 bg-red-600 rounded hover:bg-red-700"
+        >
+          {t("leaveGame")}
+        </button>
+      </div>
+    </>
   );
 };
 

@@ -1,156 +1,93 @@
-import React, { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import { ref, onValue, remove } from "firebase/database";
+import React, { useEffect, useState } from "react";
 import { database } from "../config/firebaseConfig";
+import { ref, set, remove, onValue, get, onDisconnect } from "firebase/database";
+import { useNavigate } from "react-router-dom";
+import MainNav from "../components/MainNav";
+import { joinQueue } from "../services/matchmakingService";
+import { useTranslation } from "react-i18next";
 
-const Lobby = ({ userId, sessionToken, onMatchFound }) => {
-  const [message, setMessage] = useState("");
-  const [matchId, setMatchId] = useState(null);
-  const [waiting, setWaiting] = useState(false);
+const Lobby = () => {
   const navigate = useNavigate();
+  const { t } = useTranslation();
+  const userId = localStorage.getItem("userId");
+  const [onlinePlayers, setOnlinePlayers] = useState([]);
+  const [usernames, setUsernames] = useState({});
 
   useEffect(() => {
-    if (!userId) {
-      console.log("⛔ Not listening - missing userId");
-      return;
-    }
-    
-    console.log("👂 Setting up listener for userMatches/" + userId);
-    const matchRef = ref(database, `userMatches/${userId}`);
-    
-    const unsubscribe = onValue(matchRef, (snapshot) => {
-      console.log("🔥 onValue triggered");
-      const data = snapshot.val();
-      console.log("🎮 Match data from RTDB:", data);
-      // Only navigate if data exists, has a matchId, and status is "ready"
-      if (data && data.matchId && data.status === "ready") {
-        setMatchId(data.matchId);
-        setMessage("Match found! Redirecting to game...");
-        onMatchFound && onMatchFound(data.matchId);
-        navigate(`/game/${data.matchId}`);
-      }
+    if (!userId) return;
+
+    const presenceRef = ref(database, `presence/${userId}`);
+    set(presenceRef, {
+      online: true,
+      lastSeen: Date.now(),
     });
-    
-    return () => unsubscribe();
-  }, [userId]);   
 
-  useEffect(() => {
-    const checkUserMatch = async () => {
-      const userMatchRef = ref(database, `userMatches/${userId}`);
-      onValue(userMatchRef, (snapshot) => {
-        const data = snapshot.val();
-        if (data?.matchId) {
-          // Avoid redirecting to old match if already completed
-          const matchRef = ref(database, `matches/${data.matchId}`);
-          onValue(matchRef, (matchSnap) => {
-            const matchData = matchSnap.val();
-            if (matchData?.status === "completed") {
-              // Clean up lingering userMatches entry
-              remove(userMatchRef);
-            }
-          });
-        }
-      });
-    };
-  
-    checkUserMatch();
-  }, [userId]);  
+    onDisconnect(presenceRef).remove();
 
-  const handleJoinQueue = async () => {
-    if (!userId) {
-      setMessage("Please log in first!");
-      return;
+    const allPresenceRef = ref(database, "presence");
+    const unsubscribe = onValue(allPresenceRef, async (snapshot) => {
+      const presence = snapshot.val() || {};
+      const ids = Object.keys(presence);
+      setOnlinePlayers(ids);
+
+      // Get usernames
+      const updates = {};
+      await Promise.all(
+        ids.map(async (uid) => {
+          const userRef = ref(database, `users/${uid}/username`);
+          const snap = await get(userRef);
+          updates[uid] = snap.exists() ? snap.val() : "unknown_user";
+        })
+      );
+      setUsernames((prev) => ({ ...prev, ...updates }));
+    });
+
+    return () => remove(presenceRef);
+  }, [userId]);
+
+  const handleJoinGame = async () => {
+    const result = await joinQueue(userId);
+    if (result.matchId) {
+      navigate(`/game/${result.matchId}`);
+    } else {
+      navigate("/queue");
     }
-  
-    try {
-      const response = await fetch("http://localhost:3001/api/game/join", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${sessionToken}`,
-        },
-        body: JSON.stringify({ userId }),
-      });
-      const data = await response.json();
-  
-      if (data.success && !data.matchFound) {
-        setMessage(data.message);
-        setWaiting(true);
-      } else if (data.success && data.matchFound) {
-        setMatchId(data.matchId);
-        setMessage("Match found! Match ID: " + data.matchId);
-        setWaiting(true); // ensure listener is active
-        onMatchFound && onMatchFound(data.matchId, data.players);
-        navigate(`/game/${data.matchId}`);
-      } else {
-        if (data.error === "You are already in the queue, please wait for an opponent.") {
-          setWaiting(true);
-        }
-        setMessage(data.error || "An error occurred.");
-      }
-    } catch (error) {
-      console.error("Join Queue Error:", error);
-      setMessage("Server error while joining queue.");
-    }
-  };  
-
-  const handleCancelQueue = async () => {
-    try {
-      const response = await fetch("http://localhost:3001/api/game/cancel", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${sessionToken}`,
-        },
-        body: JSON.stringify({ userId }),
-      });
-
-      const data = await response.json();
-      if (data.success) {
-        setWaiting(false);
-        setMessage(data.message);
-
-        // 🧹 Optional: clear any lingering match data in RTDB
-        const matchRef = ref(database, `userMatches/${userId}`);
-        await remove(matchRef);
-      } else {
-        setMessage(data.error || "Failed to cancel queue.");
-      }
-    } catch (error) {
-      console.error("Cancel Queue Error:", error);
-      setMessage("Failed to cancel queue, server error.");
-    }
-  };
-
-  const handleGoBackToDashboard = () => {
-    navigate("/dashboard");
   };
 
   return (
-    <div style={{ textAlign: "center", marginTop: "50px" }}>
-      <h2>Lobby</h2>
-      <p>{message}</p>
-      {waiting ? (
-        <button onClick={handleCancelQueue} style={{ padding: "10px 20px", cursor: "pointer" }}>
-          Cancel Queue
-        </button>
-      ) : (
-      <button
-        onClick={handleJoinQueue}
-        style={{ padding: "10px 20px", cursor: "pointer" }}
-        disabled={waiting}
-      >
-        Join Queue
-      </button>
-      )}
-      <button
-        onClick={handleGoBackToDashboard}
-        style={{ padding: "10px 20px", cursor: "pointer", marginLeft: "10px" }}
-      >
-        Back to Dashboard
-      </button>
-      {matchId && <p>Match ID: {matchId}</p>}
-    </div>
+    <>
+      <MainNav />
+      <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-700 text-white">
+        <div className="flex flex-col items-center justify-center p-8">
+          <h2 className="text-2xl font-semibold mb-4">{t("onlinePlayers")}</h2>
+
+          {onlinePlayers.length === 0 ? (
+            <p className="text-gray-400">{t("noPlayersOnline")}</p>
+          ) : (
+            <ul className="bg-gray-800 rounded-md p-4 shadow-md w-full max-w-md space-y-2">
+              {onlinePlayers.map((id) => (
+                <li
+                  key={id}
+                  className={`text-sm truncate ${
+                    id === userId ? "text-blue-400 font-bold" : "text-green-300"
+                  }`}
+                >
+                  {usernames[id] || t("loading")}
+                  {id === userId && ` (${t("you")})`}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <button
+            onClick={handleJoinGame}
+            className="mt-6 bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-white"
+          >
+            {t("joinGame")}
+          </button>
+        </div>
+      </div>
+    </>
   );
 };
 

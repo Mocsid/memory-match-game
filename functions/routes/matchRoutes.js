@@ -1,8 +1,8 @@
+// functions/routes/matchRoutes.js
 const express = require("express");
 const router = express.Router();
 const matchController = require("../controllers/matchController");
 
-router.post("/queue/join", matchController.joinQueue);
-router.post("/queue/leave", matchController.leaveQueue);
+router.post("/join", matchController.joinQueue);
 
 module.exports = router;

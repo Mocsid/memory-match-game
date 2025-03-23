@@ -1,41 +1,73 @@
-// 📄 File: backend/controllers/matchController.js
-
 const { db } = require("../services/firebaseService");
-const { ref, get, update, remove } = require("firebase-admin/database");
+const { v4: uuidv4 } = require("uuid");
 
-exports.leaveMatch = async (req, res) => {
-  const { matchId, userId } = req.body;
-  if (!matchId || !userId) {
-    return res.status(400).json({ error: "Missing matchId or userId" });
+exports.joinQueue = async (req, res) => {
+  const { userId } = req.body;
+  if (!userId) return res.status(400).json({ error: "Missing userId" });
+
+  const queueRef = db.ref("queue");
+  const lockRef = db.ref("matchmaking/lock");
+  const matchId = uuidv4();
+
+  try {
+    // 1. Acquire matchmaking lock
+    const lockSnap = await lockRef.once("value");
+    if (lockSnap.exists()) {
+      return res.json({ waiting: true }); // someone is matching, wait
+    }
+    await lockRef.set(true); // lock matchmaking temporarily
+
+    // 2. Get queue
+    const snapshot = await queueRef.once("value");
+    const queue = snapshot.val() || {};
+
+    const waitingPlayerId = Object.keys(queue).find(
+      (id) => id !== userId && !queue[id].matchId
+    );
+
+    if (waitingPlayerId) {
+      // 3. Create match
+      const matchData = {
+        matchId,
+        players: [waitingPlayerId, userId],
+        board: generateShuffledBoard(),
+        flipped: [],
+        matched: [],
+        turn: waitingPlayerId,
+        status: "active",
+        createdAt: Date.now(),
+      };
+
+      await db.ref(`matches/${matchId}`).set(matchData);
+
+      await db.ref(`queue/${userId}`).set({ matchId });
+      await db.ref(`queue/${waitingPlayerId}/matchId`).set(matchId);
+
+      console.log(`✅ Match created: ${matchId} between ${waitingPlayerId} and ${userId}`);
+
+      await lockRef.remove(); // release lock
+      return res.json({ matchId });
+    }
+
+    // No match yet, enqueue
+    await db.ref(`queue/${userId}`).set({ joinedAt: Date.now() });
+    await lockRef.remove(); // release lock
+    console.log(`🕒 ${userId} waiting in queue...`);
+    return res.json({ waiting: true });
+
+  } catch (error) {
+    console.error("❌ joinQueue error:", error);
+    await lockRef.remove(); // always release lock
+    return res.status(500).json({ error: "Internal server error" });
   }
-
-  const matchRef = ref(db, `matches/${matchId}`);
-  const snapshot = await get(matchRef);
-  const match = snapshot.val();
-
-  if (!match) {
-    return res.status(404).json({ error: "Match not found." });
-  }
-
-  const players = match.players || [];
-  const opponent = players.find((p) => p !== userId);
-
-  // If no opponent, just delete match
-  if (!opponent) {
-    await remove(matchRef);
-    return res.json({ success: true, message: "Match removed (only 1 player)." });
-  }
-
-  // Record win/loss (in a new path if you want)
-  const resultRef = ref(db, `matchResults/${matchId}`);
-  const result = {
-    winner: opponent,
-    loser: userId,
-    timestamp: Date.now(),
-  };
-
-  await update(resultRef, result);
-  await remove(matchRef);
-
-  return res.json({ success: true, message: "Match ended. Opponent wins.", result });
 };
+
+function generateShuffledBoard() {
+  const emojis = ["🐶", "🐱", "🐭", "🐹", "🐰", "🦊", "🐻", "🐼"];
+  const pairs = [...emojis, ...emojis];
+  for (let i = pairs.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pairs[i], pairs[j]] = [pairs[j], pairs[i]];
+  }
+  return pairs;
+}
