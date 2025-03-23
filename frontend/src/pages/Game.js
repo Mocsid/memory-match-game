@@ -24,87 +24,95 @@ const Game = () => {
   const [flippedIndexes, setFlippedIndexes] = useState([]);
   const [matchedIndexes, setMatchedIndexes] = useState([]);
 
-  // SFX
   const flipSFX = new Audio(flipSound);
   const matchSFX = new Audio(matchSound);
 
-  // Track presence in this match
+  // 1. Track player presence
   useEffect(() => {
     if (!matchId || !userId) return;
 
     const presenceRef = ref(database, `matches/${matchId}/presence/${userId}`);
+    console.log(`[Presence] Setting presence for ${userId} in ${matchId}`);
     onDisconnect(presenceRef).remove();
     set(presenceRef, { online: true, lastSeen: Date.now() });
 
     return () => {
+      console.log(`[Presence] Removing presence for ${userId}`);
       remove(presenceRef);
     };
   }, [matchId, userId]);
 
-  // Listen for match updates
+  // 2. Listen to match data and presence
   useEffect(() => {
     if (!matchId) return;
-
     const matchRef = ref(database, `matches/${matchId}`);
-    const unsub = onValue(matchRef, (snapshot) => {
+
+    const unsub = onValue(matchRef, async (snapshot) => {
       const data = snapshot.val();
+
       if (!data) {
-        // match is missing -> go home
-        console.warn("Match not found; going home");
+        console.warn("⚠️ Match not found, redirecting home");
         navigate("/");
         return;
       }
 
+      console.log("[Match] Match data updated:", data);
       setMatchData(data);
       setFlippedIndexes(data.flipped || []);
       setMatchedIndexes(data.matched || []);
 
-      // Check if a player left mid-game
       const players = data.players || [];
       const presence = data.presence || {};
-      const onlineCount = players.filter((p) => presence[p]?.online).length;
+      const onlineCount = players.filter((uid) => presence[uid]?.online).length;
 
-      // If game is active, but only 1 or 0 players are online => auto-complete
-      if (data.status === "active" && onlineCount < 2 && players.length === 2) {
+      console.log("[Presence Check]", { players, presence, onlineCount });
+
+      if (
+        data.status === "active" &&
+        players.length === 2 &&
+        Object.keys(presence).length >= 2 &&
+        onlineCount < 2
+      ) {
         const loser = players.find((uid) => !presence[uid]?.online);
-        const winner = players.find((uid) => uid && uid !== loser);
+        const winner = players.find((uid) => uid !== loser);
+
         if (!winner) {
-          console.error("Cannot determine winner", { players, presence });
+          console.error("❌ Cannot determine winner.", { players, presence });
           return;
         }
 
-        // Mark completed
-        update(matchRef, {
+        console.log(`🏁 Player ${loser} left. Winner: ${winner}`);
+
+        await update(matchRef, {
           status: "completed",
           winner,
-        }).then(() => {
-          // Optionally update stats in /users
-          // (We could store wins/losses on match creation if you want)
-          // Example:
-          update(ref(database, `users/${winner}`), {
-            wins: (data.wins || 0) + 1, 
-          });
-          update(ref(database, `users/${loser}`), {
-            losses: (data.losses || 0) + 1,
-          });
-
-          // Optionally do NOT remove the match here to avoid "match not found" for the other user
-          // If you want to remove it, do it after a delay:
-          setTimeout(() => {
-            // remove(matchRef);
-            navigate("/");
-          }, 3000);
         });
+
+        await update(ref(database, `users/${winner}`), {
+          wins: (data.wins || 0) + 1,
+        });
+
+        await update(ref(database, `users/${loser}`), {
+          losses: (data.losses || 0) + 1,
+        });
+
+        setTimeout(() => {
+          // You can optionally remove the match from DB here
+          // remove(matchRef);
+          navigate("/");
+        }, 3000);
       }
     });
 
-    return () => off(matchRef);
+    return () => {
+      console.log("[Match] Unsubscribing match listener");
+      off(matchRef);
+    };
   }, [matchId, navigate, userId]);
 
-  // Is it my turn?
+  // 3. Card click logic
   const isMyTurn = matchData?.turn === userId;
 
-  // Handle flipping a card
   const handleCardClick = async (index) => {
     if (!matchData || !isMyTurn) return;
     if (flippedIndexes.includes(index) || matchedIndexes.includes(index)) return;
@@ -116,20 +124,17 @@ const Game = () => {
     const matchRef = ref(database, `matches/${matchId}`);
     await update(matchRef, { flipped: updatedFlipped });
 
-    // If two cards are now flipped, check if it’s a match
     if (updatedFlipped.length === 2) {
       const [i1, i2] = updatedFlipped;
       const isMatch = matchData.board[i1] === matchData.board[i2];
+
       if (isMatch) matchSFX.play();
 
-      // Wait 1 second before resetting flips
       await new Promise((r) => setTimeout(r, 1000));
 
       const updates = {
         flipped: [],
-        matched: isMatch
-          ? [...matchedIndexes, i1, i2]
-          : matchedIndexes,
+        matched: isMatch ? [...matchedIndexes, i1, i2] : matchedIndexes,
         turn: isMatch
           ? userId
           : matchData.players.find((id) => id !== userId),
@@ -139,6 +144,7 @@ const Game = () => {
     }
   };
 
+  // 4. Render states
   if (!matchData) {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-900 text-white">
@@ -148,7 +154,7 @@ const Game = () => {
   }
 
   if (!Array.isArray(matchData.board)) {
-    console.error("Invalid or missing board in match:", matchData);
+    console.error("❌ Invalid board:", matchData);
     return (
       <div className="flex items-center justify-center h-screen bg-gray-900 text-white">
         Error: Invalid game board.
@@ -156,9 +162,9 @@ const Game = () => {
     );
   }
 
-  // For UX: if we still only have partial presence, show a waiting message
   const presence = matchData.presence || {};
   const players = matchData.players || [];
+
   if (players.length === 2 && Object.keys(presence).length < 2) {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-900 text-white">
@@ -167,7 +173,7 @@ const Game = () => {
     );
   }
 
-  // Render the board
+  // Render the game board
   const isMatched = (i) => matchedIndexes.includes(i);
   const isFlipped = (i) => flippedIndexes.includes(i);
 
@@ -199,7 +205,7 @@ const Game = () => {
 
         <button
           onClick={() => {
-            // If user leaves mid-game, remove them from presence
+            console.log(`[Leave] ${userId} is leaving the match`);
             remove(ref(database, `matches/${matchId}/presence/${userId}`));
             navigate("/");
           }}
