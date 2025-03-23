@@ -10,6 +10,7 @@ import {
   remove,
   onDisconnect,
   off,
+  get,
 } from "firebase/database";
 import MainNav from "../components/MainNav";
 import flipSound from "../assets/sounds/flip.wav";
@@ -23,16 +24,17 @@ const Game = () => {
   const [matchData, setMatchData] = useState(null);
   const [flippedIndexes, setFlippedIndexes] = useState([]);
   const [matchedIndexes, setMatchedIndexes] = useState([]);
+  const [flipCount, setFlipCount] = useState(0);
 
   const flipSFX = new Audio(flipSound);
   const matchSFX = new Audio(matchSound);
 
-  // 1. Track player presence
+  // Set presence
   useEffect(() => {
     if (!matchId || !userId) return;
 
-    const presenceRef = ref(database, `matches/${matchId}/presence/${userId}`);
     console.log(`[Presence] Setting presence for ${userId} in ${matchId}`);
+    const presenceRef = ref(database, `matches/${matchId}/presence/${userId}`);
     onDisconnect(presenceRef).remove();
     set(presenceRef, { online: true, lastSeen: Date.now() });
 
@@ -42,16 +44,15 @@ const Game = () => {
     };
   }, [matchId, userId]);
 
-  // 2. Listen to match data and presence
+  // Listen to match updates
   useEffect(() => {
     if (!matchId) return;
+
     const matchRef = ref(database, `matches/${matchId}`);
-
-    const unsub = onValue(matchRef, async (snapshot) => {
+    const unsub = onValue(matchRef, (snapshot) => {
       const data = snapshot.val();
-
       if (!data) {
-        console.warn("⚠️ Match not found, redirecting home");
+        console.warn("[Match] Not found — redirecting to home.");
         navigate("/");
         return;
       }
@@ -60,47 +61,65 @@ const Game = () => {
       setMatchData(data);
       setFlippedIndexes(data.flipped || []);
       setMatchedIndexes(data.matched || []);
+      setFlipCount(data.flipCounts?.[userId] || 0);
 
       const players = data.players || [];
       const presence = data.presence || {};
-      const onlineCount = players.filter((uid) => presence[uid]?.online).length;
+      console.log("[Presence Check]", presence);
 
-      console.log("[Presence Check]", { players, presence, onlineCount });
-
+      // Safeguard presence check
       if (
         data.status === "active" &&
         players.length === 2 &&
-        Object.keys(presence).length >= 2 &&
-        onlineCount < 2
+        Object.keys(presence).length === 2 &&
+        players.some((uid) => !presence[uid]?.online)
       ) {
         const loser = players.find((uid) => !presence[uid]?.online);
-        const winner = players.find((uid) => uid !== loser);
+        const winner = players.find((uid) => uid && uid !== loser);
 
         if (!winner) {
-          console.error("❌ Cannot determine winner.", { players, presence });
+          console.error("[Match] Cannot determine winner", { players, presence });
           return;
         }
 
-        console.log(`🏁 Player ${loser} left. Winner: ${winner}`);
+        // Wait 3s and verify before declaring winner
+        setTimeout(async () => {
+          const latestSnapshot = await get(ref(database, `matches/${matchId}/presence`));
+          const latestPresence = latestSnapshot.val() || {};
+          const stillGone = !latestPresence[loser]?.online;
 
-        await update(matchRef, {
-          status: "completed",
-          winner,
-        });
+          if (stillGone) {
+            console.warn("[Match] Confirmed player left. Declaring winner.");
 
-        await update(ref(database, `users/${winner}`), {
-          wins: (data.wins || 0) + 1,
-        });
+            const winnerRef = ref(database, `users/${winner}`);
+            const loserRef = ref(database, `users/${loser}`);
 
-        await update(ref(database, `users/${loser}`), {
-          losses: (data.losses || 0) + 1,
-        });
+            await update(ref(database, `matches/${matchId}`), {
+              status: "completed",
+              winner,
+            });
 
-        setTimeout(() => {
-          // You can optionally remove the match from DB here
-          // remove(matchRef);
-          navigate("/");
+            await update(winnerRef, {
+              wins: (data.wins || 0) + 1,
+            });
+
+            await update(loserRef, {
+              losses: (data.losses || 0) + 1,
+            });
+
+            setTimeout(() => {
+              navigate(`/summary/${matchId}`);
+            }, 2000);
+          }
         }, 3000);
+      }
+
+      // Match ended normally
+      if (data.status === "completed" && data.winner) {
+        console.log("[Match] Game completed. Redirecting to summary.");
+        setTimeout(() => {
+          navigate(`/summary/${matchId}`);
+        }, 2000);
       }
     });
 
@@ -110,7 +129,6 @@ const Game = () => {
     };
   }, [matchId, navigate, userId]);
 
-  // 3. Card click logic
   const isMyTurn = matchData?.turn === userId;
 
   const handleCardClick = async (index) => {
@@ -122,15 +140,19 @@ const Game = () => {
     flipSFX.play();
 
     const matchRef = ref(database, `matches/${matchId}`);
-    await update(matchRef, { flipped: updatedFlipped });
+    const newFlipCount = (matchData.flipCounts?.[userId] || 0) + 1;
+
+    await update(matchRef, {
+      flipped: updatedFlipped,
+      [`flipCounts/${userId}`]: newFlipCount,
+    });
 
     if (updatedFlipped.length === 2) {
       const [i1, i2] = updatedFlipped;
       const isMatch = matchData.board[i1] === matchData.board[i2];
-
       if (isMatch) matchSFX.play();
 
-      await new Promise((r) => setTimeout(r, 1000));
+      await new Promise((res) => setTimeout(res, 1000));
 
       const updates = {
         flipped: [],
@@ -144,7 +166,6 @@ const Game = () => {
     }
   };
 
-  // 4. Render states
   if (!matchData) {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-900 text-white">
@@ -154,18 +175,21 @@ const Game = () => {
   }
 
   if (!Array.isArray(matchData.board)) {
-    console.error("❌ Invalid board:", matchData);
+    console.error("[Game] Invalid board:", matchData);
     return (
       <div className="flex items-center justify-center h-screen bg-gray-900 text-white">
-        Error: Invalid game board.
+        Error loading game board.
       </div>
     );
   }
 
   const presence = matchData.presence || {};
   const players = matchData.players || [];
-
-  if (players.length === 2 && Object.keys(presence).length < 2) {
+  if (
+    matchData.status === "active" &&
+    players.length === 2 &&
+    Object.keys(presence).length < 2
+  ) {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-900 text-white">
         Waiting for both players to connect...
@@ -173,7 +197,6 @@ const Game = () => {
     );
   }
 
-  // Render the game board
   const isMatched = (i) => matchedIndexes.includes(i);
   const isFlipped = (i) => flippedIndexes.includes(i);
 
@@ -198,14 +221,14 @@ const Game = () => {
                   : "bg-gray-600 hover:bg-gray-500"
               }`}
             >
-              {isFlipped(index) || isMatched(index) ? emoji : "❓"}
+              {isMatched(index) || isFlipped(index) ? emoji : "❓"}
             </div>
           ))}
         </div>
 
         <button
           onClick={() => {
-            console.log(`[Leave] ${userId} is leaving the match`);
+            console.log("[Leave] " + userId + " is leaving the match");
             remove(ref(database, `matches/${matchId}/presence/${userId}`));
             navigate("/");
           }}

@@ -6,6 +6,8 @@ import Scoreboard from "./pages/Scoreboard";
 import Lobby from "./pages/Lobby";
 import QueueWaiting from "./pages/QueueWaiting";
 import Game from "./pages/Game";
+import GameSummary from "./pages/GameSummary";
+
 
 function App() {
   const [isReady, setIsReady] = useState(false);
@@ -32,6 +34,7 @@ function App() {
         <Route path="/lobby" element={<Lobby />} />
         <Route path="/queue" element={<QueueWaiting />} />
         <Route path="/game/:matchId" element={<Game />} />
+        <Route path="/summary/:matchId" element={<GameSummary />} />
       </Routes>
     </Router>
   );
