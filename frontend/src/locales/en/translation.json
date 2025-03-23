@@ -33,6 +33,8 @@
     "losses": "Losses",
     "games": "Games",
     "refreshPage": "Refresh Page",
-    "profileMessage": "Profile has been created, please refresh the page."
+    "profileMessage": "Profile has been created, please refresh the page.",
+    "waitingForPlayer": "Waiting for another player...",
+    "Username": "Username"
   }
   
