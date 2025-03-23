@@ -1,5 +1,3 @@
-// FILE: frontend/src/pages/GameSummary.js
-
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ref, get } from "firebase/database";
@@ -23,13 +21,12 @@ const GameSummary = () => {
         setLoading(false);
         return;
       }
+
       const data = snapshot.val();
       const players = data.players || [];
 
-      // Grab the opponent
       const opponentId = players.find((id) => id !== userId);
 
-      // Fetch user + opponent data
       const [userSnap, opponentSnap] = await Promise.all([
         get(ref(database, `users/${userId}`)),
         get(ref(database, `users/${opponentId}`)),
@@ -59,6 +56,7 @@ const GameSummary = () => {
   }
 
   const winnerId = matchData.winner;
+  const isDraw = matchData.isDraw === true;
   const players = matchData.players || [];
   const flipCounts = matchData.flipCounts || {};
 
@@ -66,24 +64,24 @@ const GameSummary = () => {
   const opponentId = players.find((id) => id !== userId) || "";
   const opponentFlipCount = flipCounts[opponentId] || 0;
 
-  // Decide if user is the winner
   const isWinner = winnerId === userId;
 
-  // Check if user left quickly (0 flips) and the other is winner
   const userLeft =
     matchData.status === "completed" &&
     !isWinner &&
     userFlipCount === 0 &&
     players.length === 2;
 
-  const resultMessage = userLeft
-    ? "💀 You left the game. You lost."
-    : isWinner
-    ? "🎉 You Won!"
-    : "💀 You Lost";
+  let resultMessage = "💀 You Lost";
 
-  // If userLeft is true, opponent “wins because you left” message
-  // Otherwise show normal flip stats message
+  if (userLeft) {
+    resultMessage = "💀 You left the game. You lost.";
+  } else if (isDraw) {
+    resultMessage = "🤝 It's a Draw!";
+  } else if (isWinner) {
+    resultMessage = "🎉 You Won!";
+  }
+
   const opponentMessage = userLeft
     ? `${opponentData.username || "Opponent"} wins because you left.`
     : `${opponentData.username || "Opponent"} flipped ${opponentFlipCount} cards.`;
@@ -97,7 +95,11 @@ const GameSummary = () => {
         <div className="bg-gray-800 p-6 rounded-xl shadow-lg max-w-md w-full text-center">
           <h2
             className={`text-2xl mb-2 ${
-              isWinner ? "text-green-400" : "text-red-400"
+              isDraw
+                ? "text-yellow-400"
+                : isWinner
+                ? "text-green-400"
+                : "text-red-400"
             }`}
           >
             {resultMessage}

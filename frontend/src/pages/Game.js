@@ -23,6 +23,7 @@ const Game = () => {
   const [matchData, setMatchData] = useState(null);
   const [flippedIndexes, setFlippedIndexes] = useState([]);
   const [matchedIndexes, setMatchedIndexes] = useState([]);
+  const [flipCounts, setFlipCounts] = useState({});
   const [myUsername, setMyUsername] = useState("You");
   const [opponentUsername, setOpponentUsername] = useState("Opponent");
   const [presenceReady, setPresenceReady] = useState(false);
@@ -38,7 +39,7 @@ const Game = () => {
     set(presenceRef, { online: true, lastSeen: Date.now() });
 
     return () => {
-      // No removal here to prevent early false disconnect
+      // Skip removing on unload to avoid false disconnects
     };
   }, [matchId, userId]);
 
@@ -77,6 +78,7 @@ const Game = () => {
       setMatchData(data);
       setFlippedIndexes(data.flipped || []);
       setMatchedIndexes(data.matched || []);
+      setFlipCounts(data.flipCounts || {});
 
       const players = data.players || [];
       const presence = data.presence || {};
@@ -86,7 +88,6 @@ const Game = () => {
       );
 
       if (!presenceReady && allPlayersPresent) {
-        console.log("[Presence] All players online. Starting monitoring.");
         setPresenceReady(true);
       }
 
@@ -98,44 +99,48 @@ const Game = () => {
       }
 
       if ((data.matched?.length || 0) === 16 && data.status === "active") {
-        const flipCounts = data.flipCounts || {};
         const [p1, p2] = players;
-        const p1Flips = flipCounts[p1] || 0;
-        const p2Flips = flipCounts[p2] || 0;
-        const winner = p1Flips > p2Flips ? p1 : p2;
-        const loser = players.find((uid) => uid !== winner);
+        const p1Flips = data.flipCounts?.[p1] || 0;
+        const p2Flips = data.flipCounts?.[p2] || 0;
+        const isDraw = p1Flips === p2Flips;
 
-        const winnerRef = ref(database, `users/${winner}`);
-        const loserRef = ref(database, `users/${loser}`);
+        const winner = isDraw ? null : p1Flips > p2Flips ? p1 : p2;
+        const loser = isDraw ? null : players.find((uid) => uid !== winner);
 
-        const [winnerSnap, loserSnap] = await Promise.all([
-          get(winnerRef),
-          get(loserRef),
-        ]);
-
-        const winnerData = winnerSnap.val() || {};
-        const loserData = loserSnap.val() || {};
+        const p1Ref = ref(database, `users/${p1}`);
+        const p2Ref = ref(database, `users/${p2}`);
+        const [p1Snap, p2Snap] = await Promise.all([get(p1Ref), get(p2Ref)]);
+        const p1Data = p1Snap.val() || {};
+        const p2Data = p2Snap.val() || {};
 
         await update(ref(database, `matches/${matchId}`), {
           status: "completed",
-          winner,
+          winner: winner,
+          isDraw: isDraw,
         });
 
         await Promise.all([
-          update(winnerRef, {
-            wins: (winnerData.wins || 0) + 1,
-            games: (winnerData.games || 0) + 1,
+          update(p1Ref, {
+            games: (p1Data.games || 0) + 1,
+            ...(isDraw
+              ? {}
+              : winner === p1
+              ? { wins: (p1Data.wins || 0) + 1 }
+              : { losses: (p1Data.losses || 0) + 1 }),
           }),
-          update(loserRef, {
-            losses: (loserData.losses || 0) + 1,
-            games: (loserData.games || 0) + 1,
+          update(p2Ref, {
+            games: (p2Data.games || 0) + 1,
+            ...(isDraw
+              ? {}
+              : winner === p2
+              ? { wins: (p2Data.wins || 0) + 1 }
+              : { losses: (p2Data.losses || 0) + 1 }),
           }),
         ]);
 
         return;
       }
 
-      // ✅ Only handle presence disconnect after both players were confirmed online
       if (
         presenceReady &&
         data.status === "active" &&
@@ -147,7 +152,6 @@ const Game = () => {
 
         const winnerRef = ref(database, `users/${winner}`);
         const loserRef = ref(database, `users/${leaver}`);
-
         const [winnerSnap, loserSnap] = await Promise.all([
           get(winnerRef),
           get(loserRef),
@@ -159,6 +163,7 @@ const Game = () => {
         await update(ref(database, `matches/${matchId}`), {
           status: "completed",
           winner,
+          isDraw: false,
         });
 
         await Promise.all([
@@ -259,6 +264,7 @@ const Game = () => {
 
   const isMatched = (i) => matchedIndexes.includes(i);
   const isFlipped = (i) => flippedIndexes.includes(i);
+  const opponentId = (players || []).find((id) => id !== userId);
 
   const handleLeaveGame = () => {
     remove(ref(database, `matches/${matchId}/presence/${userId}`));
@@ -269,11 +275,16 @@ const Game = () => {
     <>
       <MainNav />
       <div className="min-h-screen flex flex-col items-center justify-center text-white bg-gray-900">
-        <h2 className="text-2xl mb-4">
+        <h2 className="text-2xl mb-2">
           {isMyTurn
             ? `Your turn (${myUsername})`
             : `Waiting for opponent (${opponentUsername})`}
         </h2>
+
+        <p className="text-lg mb-4">
+          Score: {myUsername} - {flipCounts[userId] || 0} | {opponentUsername} -{" "}
+          {flipCounts[opponentId] || 0}
+        </p>
 
         <div className="grid grid-cols-4 gap-4">
           {matchData.board.map((emoji, index) => (
