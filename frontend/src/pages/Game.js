@@ -30,7 +30,6 @@ const Game = () => {
   const flipSFX = new Audio(flipSound);
   const matchSFX = new Audio(matchSound);
 
-  // Set presence
   useEffect(() => {
     if (!matchId || !userId) return;
 
@@ -69,7 +68,7 @@ const Game = () => {
     if (!matchId) return;
 
     const matchRef = ref(database, `matches/${matchId}`);
-    const unsub = onValue(matchRef, (snapshot) => {
+    const unsub = onValue(matchRef, async (snapshot) => {
       const data = snapshot.val();
       if (!data) {
         navigate("/");
@@ -83,7 +82,6 @@ const Game = () => {
       const players = data.players || [];
       const presence = data.presence || {};
 
-      // Match completed check
       if (data.status === "completed" && data.winner) {
         setTimeout(() => {
           navigate(`/summary/${matchId}`);
@@ -100,25 +98,38 @@ const Game = () => {
             : players[1];
 
         const loser = players.find((uid) => uid !== winner);
-        const winnerRef = ref(database, `users/${winner}`);
-        const loserRef = ref(database, `users/${loser}`);
 
-        update(ref(database, `matches/${matchId}`), {
+        await update(ref(database, `matches/${matchId}`), {
           status: "completed",
           winner,
         });
 
-        update(winnerRef, {
-          wins: (data.wins || 0) + 1,
-        });
+        const winnerRef = ref(database, `users/${winner}`);
+        const loserRef = ref(database, `users/${loser}`);
 
-        update(loserRef, {
-          losses: (data.losses || 0) + 1,
-        });
+        const [winnerSnap, loserSnap] = await Promise.all([
+          get(winnerRef),
+          get(loserRef),
+        ]);
+
+        const winnerData = winnerSnap.val() || {};
+        const loserData = loserSnap.val() || {};
+
+        await Promise.all([
+          update(winnerRef, {
+            wins: (winnerData.wins || 0) + 1,
+            username: winnerData.username || `unknown_${winner}`,
+          }),
+          update(loserRef, {
+            losses: (loserData.losses || 0) + 1,
+            username: loserData.username || `unknown_${loser}`,
+          }),
+        ]);
 
         setTimeout(() => {
           navigate(`/summary/${matchId}`);
         }, 2000);
+
         return;
       }
 
@@ -136,16 +147,30 @@ const Game = () => {
           const check = await get(ref(database, `matches/${matchId}/presence`));
           const stillGone = !check.val()?.[leaver]?.online;
           if (stillGone) {
-            update(ref(database, `matches/${matchId}`), {
+            await update(ref(database, `matches/${matchId}`), {
               status: "completed",
               winner: other,
             });
-            await update(ref(database, `users/${other}`), {
-              wins: (data.wins || 0) + 1,
-            });
-            await update(ref(database, `users/${leaver}`), {
-              losses: (data.losses || 0) + 1,
-            });
+
+            const [winnerSnap, loserSnap] = await Promise.all([
+              get(ref(database, `users/${other}`)),
+              get(ref(database, `users/${leaver}`)),
+            ]);
+
+            const winnerData = winnerSnap.val() || {};
+            const loserData = loserSnap.val() || {};
+
+            await Promise.all([
+              update(ref(database, `users/${other}`), {
+                wins: (winnerData.wins || 0) + 1,
+                username: winnerData.username || `unknown_${other}`,
+              }),
+              update(ref(database, `users/${leaver}`), {
+                losses: (loserData.losses || 0) + 1,
+                username: loserData.username || `unknown_${leaver}`,
+              }),
+            ]);
+
             navigate(`/summary/${matchId}`);
           }
         }, 3000);
