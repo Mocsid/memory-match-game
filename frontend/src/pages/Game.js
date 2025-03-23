@@ -24,7 +24,8 @@ const Game = () => {
   const [matchData, setMatchData] = useState(null);
   const [flippedIndexes, setFlippedIndexes] = useState([]);
   const [matchedIndexes, setMatchedIndexes] = useState([]);
-  const [flipCount, setFlipCount] = useState(0);
+  const [myUsername, setMyUsername] = useState("You");
+  const [opponentUsername, setOpponentUsername] = useState("Opponent");
 
   const flipSFX = new Audio(flipSound);
   const matchSFX = new Audio(matchSound);
@@ -33,15 +34,34 @@ const Game = () => {
   useEffect(() => {
     if (!matchId || !userId) return;
 
-    console.log(`[Presence] Setting presence for ${userId} in ${matchId}`);
     const presenceRef = ref(database, `matches/${matchId}/presence/${userId}`);
     onDisconnect(presenceRef).remove();
     set(presenceRef, { online: true, lastSeen: Date.now() });
 
     return () => {
-      console.log(`[Presence] Removing presence for ${userId}`);
       remove(presenceRef);
     };
+  }, [matchId, userId]);
+
+  // Fetch usernames
+  useEffect(() => {
+    if (!matchId || !userId) return;
+    const usersRef = ref(database, "users");
+    get(usersRef).then((snapshot) => {
+      const users = snapshot.val();
+      if (!users) return;
+
+      const matchRef = ref(database, `matches/${matchId}`);
+      get(matchRef).then((snap) => {
+        const data = snap.val();
+        if (!data) return;
+
+        const players = data.players || [];
+        const opponentId = players.find((id) => id !== userId);
+        if (users[userId]) setMyUsername(users[userId].username);
+        if (opponentId && users[opponentId]) setOpponentUsername(users[opponentId].username);
+      });
+    });
   }, [matchId, userId]);
 
   // Listen to match updates
@@ -52,79 +72,87 @@ const Game = () => {
     const unsub = onValue(matchRef, (snapshot) => {
       const data = snapshot.val();
       if (!data) {
-        console.warn("[Match] Not found — redirecting to home.");
         navigate("/");
         return;
       }
 
-      console.log("[Match] Match data updated:", data);
       setMatchData(data);
       setFlippedIndexes(data.flipped || []);
       setMatchedIndexes(data.matched || []);
-      setFlipCount(data.flipCounts?.[userId] || 0);
 
       const players = data.players || [];
       const presence = data.presence || {};
-      console.log("[Presence Check]", presence);
 
-      // Safeguard presence check
+      // Match completed check
+      if (data.status === "completed" && data.winner) {
+        setTimeout(() => {
+          navigate(`/summary/${matchId}`);
+        }, 2000);
+        return;
+      }
+
+      // All cards matched
+      if ((data.matched?.length || 0) === 16 && data.status === "active") {
+        const flipCounts = data.flipCounts || {};
+        const winner =
+          (flipCounts[players[0]] || 0) > (flipCounts[players[1]] || 0)
+            ? players[0]
+            : players[1];
+
+        const loser = players.find((uid) => uid !== winner);
+        const winnerRef = ref(database, `users/${winner}`);
+        const loserRef = ref(database, `users/${loser}`);
+
+        update(ref(database, `matches/${matchId}`), {
+          status: "completed",
+          winner,
+        });
+
+        update(winnerRef, {
+          wins: (data.wins || 0) + 1,
+        });
+
+        update(loserRef, {
+          losses: (data.losses || 0) + 1,
+        });
+
+        setTimeout(() => {
+          navigate(`/summary/${matchId}`);
+        }, 2000);
+        return;
+      }
+
+      // Player left handling
       if (
         data.status === "active" &&
         players.length === 2 &&
         Object.keys(presence).length === 2 &&
         players.some((uid) => !presence[uid]?.online)
       ) {
-        const loser = players.find((uid) => !presence[uid]?.online);
-        const winner = players.find((uid) => uid && uid !== loser);
+        const leaver = players.find((uid) => !presence[uid]?.online);
+        const other = players.find((uid) => uid !== leaver);
 
-        if (!winner) {
-          console.error("[Match] Cannot determine winner", { players, presence });
-          return;
-        }
-
-        // Wait 3s and verify before declaring winner
         setTimeout(async () => {
-          const latestSnapshot = await get(ref(database, `matches/${matchId}/presence`));
-          const latestPresence = latestSnapshot.val() || {};
-          const stillGone = !latestPresence[loser]?.online;
-
+          const check = await get(ref(database, `matches/${matchId}/presence`));
+          const stillGone = !check.val()?.[leaver]?.online;
           if (stillGone) {
-            console.warn("[Match] Confirmed player left. Declaring winner.");
-
-            const winnerRef = ref(database, `users/${winner}`);
-            const loserRef = ref(database, `users/${loser}`);
-
-            await update(ref(database, `matches/${matchId}`), {
+            update(ref(database, `matches/${matchId}`), {
               status: "completed",
-              winner,
+              winner: other,
             });
-
-            await update(winnerRef, {
+            await update(ref(database, `users/${other}`), {
               wins: (data.wins || 0) + 1,
             });
-
-            await update(loserRef, {
+            await update(ref(database, `users/${leaver}`), {
               losses: (data.losses || 0) + 1,
             });
-
-            setTimeout(() => {
-              navigate(`/summary/${matchId}`);
-            }, 2000);
+            navigate(`/summary/${matchId}`);
           }
         }, 3000);
-      }
-
-      // Match ended normally
-      if (data.status === "completed" && data.winner) {
-        console.log("[Match] Game completed. Redirecting to summary.");
-        setTimeout(() => {
-          navigate(`/summary/${matchId}`);
-        }, 2000);
       }
     });
 
     return () => {
-      console.log("[Match] Unsubscribing match listener");
       off(matchRef);
     };
   }, [matchId, navigate, userId]);
@@ -136,15 +164,10 @@ const Game = () => {
     if (flippedIndexes.includes(index) || matchedIndexes.includes(index)) return;
 
     const updatedFlipped = [...flippedIndexes, index];
-    setFlippedIndexes(updatedFlipped);
     flipSFX.play();
 
-    const matchRef = ref(database, `matches/${matchId}`);
-    const newFlipCount = (matchData.flipCounts?.[userId] || 0) + 1;
-
-    await update(matchRef, {
+    await update(ref(database, `matches/${matchId}`), {
       flipped: updatedFlipped,
-      [`flipCounts/${userId}`]: newFlipCount,
     });
 
     if (updatedFlipped.length === 2) {
@@ -154,47 +177,37 @@ const Game = () => {
 
       await new Promise((res) => setTimeout(res, 1000));
 
-      const updates = {
-        flipped: [],
-        matched: isMatch ? [...matchedIndexes, i1, i2] : matchedIndexes,
-        turn: isMatch
-          ? userId
-          : matchData.players.find((id) => id !== userId),
-      };
+      const newMatched = isMatch ? [...matchedIndexes, i1, i2] : matchedIndexes;
+      const newFlipCount = isMatch
+        ? (matchData.flipCounts?.[userId] || 0) + 1
+        : matchData.flipCounts?.[userId] || 0;
 
-      await update(matchRef, updates);
+      const turn = isMatch
+        ? userId
+        : matchData.players.find((id) => id !== userId);
+
+      await update(ref(database, `matches/${matchId}`), {
+        flipped: [],
+        matched: newMatched,
+        turn,
+        [`flipCounts/${userId}`]: newFlipCount,
+      });
     }
   };
 
   if (!matchData) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-gray-900 text-white">
-        Loading game...
-      </div>
-    );
+    return <div className="h-screen flex justify-center items-center text-white">Loading game...</div>;
   }
 
-  if (!Array.isArray(matchData.board)) {
-    console.error("[Game] Invalid board:", matchData);
-    return (
-      <div className="flex items-center justify-center h-screen bg-gray-900 text-white">
-        Error loading game board.
-      </div>
-    );
-  }
-
-  const presence = matchData.presence || {};
   const players = matchData.players || [];
+  const presence = matchData.presence || {};
+
   if (
     matchData.status === "active" &&
     players.length === 2 &&
     Object.keys(presence).length < 2
   ) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-gray-900 text-white">
-        Waiting for both players to connect...
-      </div>
-    );
+    return <div className="h-screen flex justify-center items-center text-white">Waiting for both players to connect...</div>;
   }
 
   const isMatched = (i) => matchedIndexes.includes(i);
@@ -203,9 +216,11 @@ const Game = () => {
   return (
     <>
       <MainNav />
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-700 flex flex-col items-center justify-center text-white px-4">
-        <h2 className="text-2xl font-semibold mb-4">
-          {isMyTurn ? "Your turn!" : "Waiting for opponent..."}
+      <div className="min-h-screen flex flex-col items-center justify-center text-white bg-gray-900">
+        <h2 className="text-2xl mb-4">
+          {isMyTurn
+            ? `Your turn (${myUsername})`
+            : `Waiting for opponent (${opponentUsername})`}
         </h2>
 
         <div className="grid grid-cols-4 gap-4">
@@ -213,7 +228,7 @@ const Game = () => {
             <div
               key={index}
               onClick={() => handleCardClick(index)}
-              className={`w-16 h-16 flex items-center justify-center text-2xl rounded-md shadow-md cursor-pointer transition-all ${
+              className={`w-16 h-16 flex items-center justify-center text-2xl rounded-md cursor-pointer ${
                 isMatched(index)
                   ? "bg-green-600"
                   : isFlipped(index)
@@ -228,11 +243,10 @@ const Game = () => {
 
         <button
           onClick={() => {
-            console.log("[Leave] " + userId + " is leaving the match");
             remove(ref(database, `matches/${matchId}/presence/${userId}`));
             navigate("/");
           }}
-          className="mt-6 px-4 py-2 bg-red-600 hover:bg-red-700 rounded"
+          className="mt-6 px-4 py-2 bg-red-600 rounded hover:bg-red-700"
         >
           Leave Game
         </button>
