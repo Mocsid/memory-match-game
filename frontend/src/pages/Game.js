@@ -5,7 +5,6 @@ import {
   onValue,
   set,
   update,
-  remove,
   onDisconnect,
   off,
   get,
@@ -39,7 +38,7 @@ const Game = () => {
     set(presenceRef, { online: true, lastSeen: Date.now() });
 
     return () => {
-      // Skip removing on unload to avoid false disconnects
+      off(presenceRef);
     };
   }, [matchId, userId]);
 
@@ -115,8 +114,8 @@ const Game = () => {
 
         await update(ref(database, `matches/${matchId}`), {
           status: "completed",
-          winner: winner,
-          isDraw: isDraw,
+          winner,
+          isDraw,
         });
 
         await Promise.all([
@@ -267,7 +266,7 @@ const Game = () => {
   const opponentId = (players || []).find((id) => id !== userId);
 
   const handleLeaveGame = () => {
-    remove(ref(database, `matches/${matchId}/presence/${userId}`));
+    // Do NOT manually remove presence — onDisconnect handles it
     navigate("/");
   };
 

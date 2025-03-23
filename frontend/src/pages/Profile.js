@@ -20,8 +20,14 @@ const fruitIcons = {
 };
 
 const Profile = () => {
-  const userId = localStorage.getItem("userId");
+  const [userId, setUserId] = useState(null);
   const [userData, setUserData] = useState(null);
+
+  // Wait for localStorage to populate
+  useEffect(() => {
+    const storedId = localStorage.getItem("userId");
+    if (storedId) setUserId(storedId);
+  }, []);
 
   useEffect(() => {
     if (!userId) return;
@@ -36,41 +42,51 @@ const Profile = () => {
   }, [userId]);
 
   if (!userData) {
-    return <div className="text-center mt-10 text-gray-600">Loading profile...</div>;
-  }
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen text-gray-400 bg-gray-900">
+        <p className="mb-4">Profile has been created, please refresh the page.</p>
+        <button
+          onClick={() => window.location.reload()}
+          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+        >
+          Refresh Page
+        </button>
+      </div>
+    );
+  }  
 
   const { username, wins = 0, losses = 0 } = userData;
   const totalGames = wins + losses;
 
-  const fruit = username.split("_")[1] || "";
+  const fruit = username?.split("_")[1] || "";
   const icon = fruitIcons[fruit] || "🎮";
 
   return (
     <>
-    <MainNav />
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-gray-700 text-white p-6">
-      <div className="bg-gray-800 rounded-xl shadow-lg p-8 w-full max-w-md text-center">
-        <h1 className="text-3xl font-bold mb-4">Welcome</h1>
-        <p className="text-xl mb-6">
-          <span className="text-green-300 font-semibold">{username}</span> {icon}
-        </p>
+      <MainNav />
+      <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 to-gray-700 text-white p-6">
+        <div className="bg-gray-800 rounded-xl shadow-lg p-8 w-full max-w-md text-center">
+          <h1 className="text-3xl font-bold mb-4">Welcome</h1>
+          <p className="text-xl mb-6">
+            <span className="text-green-300 font-semibold">{username}</span> {icon}
+          </p>
 
-        <div className="grid grid-cols-3 gap-4 text-center mt-4">
-          <div>
-            <p className="text-sm text-gray-400">Wins</p>
-            <p className="text-2xl font-semibold text-green-400">{wins}</p>
-          </div>
-          <div>
-            <p className="text-sm text-gray-400">Losses</p>
-            <p className="text-2xl font-semibold text-red-400">{losses}</p>
-          </div>
-          <div>
-            <p className="text-sm text-gray-400">Total Games</p>
-            <p className="text-2xl font-semibold text-blue-400">{totalGames}</p>
+          <div className="grid grid-cols-3 gap-4 text-center mt-4">
+            <div>
+              <p className="text-sm text-gray-400">Wins</p>
+              <p className="text-2xl font-semibold text-green-400">{wins}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-400">Losses</p>
+              <p className="text-2xl font-semibold text-red-400">{losses}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-400">Total Games</p>
+              <p className="text-2xl font-semibold text-blue-400">{totalGames}</p>
+            </div>
           </div>
         </div>
       </div>
-    </div>
     </>
   );
 };
